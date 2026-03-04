@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Settings as SettingsIcon, Monitor, Cpu, Loader2, Save, Eye, EyeOff } from 'lucide-react'
-import { useTheme } from '../components/theme-provider'
+import { useTheme } from '../components/theme-context'
 
 interface ModelSettings {
   provider: string

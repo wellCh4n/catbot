@@ -30,14 +30,11 @@ export function PersonaModal({ isOpen, onClose }: PersonaModalProps): React.JSX.
 
   const handleSaveConfig = async (): Promise<void> => {
     if (fileContent === originalContent) return
-    
+
     setIsSaving(true)
     try {
       const minDelay: Promise<void> = new Promise((resolve) => setTimeout(resolve, 800))
-      await Promise.all([
-        window.api.writeConfigFile(activeTab, fileContent),
-        minDelay
-      ])
+      await Promise.all([window.api.writeConfigFile(activeTab, fileContent), minDelay])
       setOriginalContent(fileContent)
     } catch (error) {
       console.error('Failed to save config file:', error)
@@ -60,7 +57,7 @@ export function PersonaModal({ isOpen, onClose }: PersonaModalProps): React.JSX.
             <X size={20} />
           </button>
         </div>
-        
+
         <div className="flex-1 flex overflow-hidden">
           {/* Sidebar */}
           <div className="w-48 border-r border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">

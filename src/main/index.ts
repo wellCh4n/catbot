@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
   // Create .catbot/workspace directory
   try {
     await mkdir(WORKSPACE_PATH, { recursive: true })
-    
+
     const systemPromptManager = new SystemPromptManager(WORKSPACE_PATH)
     const settingsManager = new SettingsManager(WORKSPACE_PATH)
     const sessionManager = new SessionManager(WORKSPACE_PATH)
@@ -85,7 +85,12 @@ app.whenReady().then(async () => {
     registerFileHandlers(WORKSPACE_PATH)
 
     // IPC Handler for Agent Loop
-    registerAgentHandlers({ workspacePath: WORKSPACE_PATH, systemPromptManager, settingsManager, sessionManager })
+    registerAgentHandlers({
+      workspacePath: WORKSPACE_PATH,
+      systemPromptManager,
+      settingsManager,
+      sessionManager
+    })
   } catch (err) {
     console.error('Failed to initialize workspace:', err)
   }

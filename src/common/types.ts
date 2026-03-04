@@ -11,3 +11,20 @@ export interface ChatMessage {
   }
   isError?: boolean
 }
+
+export interface AgentToolUseUpdate {
+  type: 'tool_use'
+  tool: string
+  input: unknown
+  toolUseId: string
+  message: ChatMessage
+}
+
+export interface AgentToolResultUpdate {
+  type: 'tool_result'
+  tool: string
+  output: string
+  id?: string
+}
+
+export type AgentUpdate = AgentToolUseUpdate | AgentToolResultUpdate

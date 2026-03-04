@@ -19,7 +19,7 @@ export default function Chat(): React.JSX.Element {
   }
 
   useEffect(() => {
-    const loadSession = async () => {
+    const loadSession = async (): Promise<void> => {
       try {
         const history = await window.api.readSession()
         if (history && history.length > 0) {

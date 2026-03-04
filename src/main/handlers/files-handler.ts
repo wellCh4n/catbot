@@ -12,17 +12,19 @@ export function registerFileHandlers(workspacePath: string): void {
 
     try {
       const entries = await readdir(targetPath, { withFileTypes: true })
-      return entries.map(entry => ({
-        name: entry.name,
-        isDirectory: entry.isDirectory(),
-        path: join(subDir, entry.name)
-      })).sort((a, b) => {
-        // Folders first, then files
-        if (a.isDirectory === b.isDirectory) {
-          return a.name.localeCompare(b.name)
-        }
-        return a.isDirectory ? -1 : 1
-      })
+      return entries
+        .map((entry) => ({
+          name: entry.name,
+          isDirectory: entry.isDirectory(),
+          path: join(subDir, entry.name)
+        }))
+        .sort((a, b) => {
+          // Folders first, then files
+          if (a.isDirectory === b.isDirectory) {
+            return a.name.localeCompare(b.name)
+          }
+          return a.isDirectory ? -1 : 1
+        })
     } catch (error) {
       console.error('Failed to read workspace directory:', error)
       throw error

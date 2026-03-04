@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { AgentUpdate, ChatMessage } from '../common/types'
 
 // Custom APIs for renderer
 const api = {
@@ -7,11 +8,11 @@ const api = {
   writeConfigFile: (fileName: string, content: string) => ipcRenderer.invoke('write-config-file', fileName, content),
   readWorkspaceDir: (subDir: string = '') => ipcRenderer.invoke('read-workspace-dir', subDir),
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
-  agentLoop: (messages: any[]) => ipcRenderer.invoke('agent-loop', messages),
+  agentLoop: (messages: ChatMessage[]) => ipcRenderer.invoke('agent-loop', messages),
   readSession: () => ipcRenderer.invoke('read-session'),
   clearSession: () => ipcRenderer.invoke('clear-session'),
-  onAgentUpdate: (callback: (data: any) => void) => {
-    const listener = (_event, value) => callback(value)
+  onAgentUpdate: (callback: (data: AgentUpdate) => void): (() => void) => {
+    const listener = (_event: unknown, value: AgentUpdate): void => callback(value)
     ipcRenderer.on('agent-update', listener)
     return () => ipcRenderer.removeListener('agent-update', listener)
   }

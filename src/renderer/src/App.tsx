@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { HashRouter, useLocation } from 'react-router-dom'
 import Sidebar from './components/sidebar'
 import Chat from './pages/chat'
@@ -10,14 +10,9 @@ function MainLayout(): React.JSX.Element {
   const location = useLocation()
   const [visitedRoutes, setVisitedRoutes] = useState<Set<string>>(new Set([location.pathname]))
 
-  useEffect(() => {
-    setVisitedRoutes((prev) => {
-      if (prev.has(location.pathname)) return prev
-      const newSet = new Set(prev)
-      newSet.add(location.pathname)
-      return newSet
-    })
-  }, [location.pathname])
+  if (!visitedRoutes.has(location.pathname)) {
+    setVisitedRoutes((prev) => new Set(prev).add(location.pathname))
+  }
 
   const routes = [
     { path: '/', component: <Chat /> },

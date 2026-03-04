@@ -15,7 +15,7 @@ import type {
 import { SystemPromptManager } from '../managers/system-prompt-manager'
 import { SettingsManager } from '../managers/settings-manager'
 import { SessionManager } from '../managers/session-manager'
-import { ChatMessage } from '../../common/types'
+import { ChatMessage, AgentUpdate } from '../../common/types'
 import { SYSTEM_PROMPT } from '../prompts/prompt'
 
 const execAsync = promisify(exec)
@@ -93,7 +93,8 @@ function limitText(text: string, limit: number): string {
 export function createToolHandlers(workspacePath: string): Record<string, ToolHandler> {
   return {
     bash: async (input: unknown) => {
-      const parsed = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+      const parsed =
+        typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
       const command = typeof parsed.command === 'string' ? parsed.command : ''
       if (!command.trim()) return ''
 
@@ -111,33 +112,52 @@ export function createToolHandlers(workspacePath: string): Record<string, ToolHa
         const output = (stdout || '') + (stderr ? `\n${stderr}` : '')
         const trimmed = output.trim()
         return trimmed ? trimmed.slice(0, 50000) : '(no output)'
-      } catch (error: any) {
+      } catch (err) {
+        const error = err as Error & {
+          code?: string | number
+          stdout?: string
+          stderr?: string
+          killed?: boolean
+        }
+
         if (error.killed || error.code === 'ETIMEDOUT') {
           return 'Error: Timeout (120s)'
         }
-        const out = (error.stdout || '') + (error.stderr || '')
+
         const msg = error.message ? error.message.split('\n')[0] : 'Command failed'
-        const fullErr = `Error: ${msg}\n${out}`
-        return fullErr.trim().slice(0, 50000)
+        const output = (error.stdout || '') + (error.stderr || '')
+        return `Error: ${msg}\n${output}`.trim().slice(0, 50000)
       }
     },
     read_file: async (input: unknown) => {
-      const parsed = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
-      const filePath = resolveWorkspacePath(workspacePath, typeof parsed.path === 'string' ? parsed.path : '')
+      const parsed =
+        typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+      const filePath = resolveWorkspacePath(
+        workspacePath,
+        typeof parsed.path === 'string' ? parsed.path : ''
+      )
       const content = await readFile(filePath, 'utf-8')
       const limit = typeof parsed.limit === 'number' ? parsed.limit : 2000
       return limitText(content, limit)
     },
     write_file: async (input: unknown) => {
-      const parsed = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
-      const filePath = resolveWorkspacePath(workspacePath, typeof parsed.path === 'string' ? parsed.path : '')
+      const parsed =
+        typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+      const filePath = resolveWorkspacePath(
+        workspacePath,
+        typeof parsed.path === 'string' ? parsed.path : ''
+      )
       const content = typeof parsed.content === 'string' ? parsed.content : ''
       await writeFile(filePath, content, 'utf-8')
       return 'ok'
     },
     edit_file: async (input: unknown) => {
-      const parsed = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
-      const filePath = resolveWorkspacePath(workspacePath, typeof parsed.path === 'string' ? parsed.path : '')
+      const parsed =
+        typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+      const filePath = resolveWorkspacePath(
+        workspacePath,
+        typeof parsed.path === 'string' ? parsed.path : ''
+      )
       const oldText = typeof parsed.old_text === 'string' ? parsed.old_text : ''
       const newText = typeof parsed.new_text === 'string' ? parsed.new_text : ''
       const content = await readFile(filePath, 'utf-8')
@@ -155,17 +175,17 @@ export async function agentLoop(
 ): Promise<MessageParam[]> {
   // Convert ChatMessage[] to MessageParam[] for Anthropic
   const messages: MessageParam[] = []
-  
+
   for (const msg of initialMessages) {
     if (msg.role === 'user') {
-        messages.push({ role: 'user', content: msg.content })
-      } else if (msg.role === 'assistant') {
-        if (msg.toolUse) {
-          // Reconstruct Tool Use and Tool Result
-          // We use the persisted toolUseId if available, otherwise fallback to deterministic ID
-          const toolUseId = msg.toolUse.toolUseId || `call_${msg.id.slice(0, 10)}`
-          
-          // 1. Assistant Message with Tool Use
+      messages.push({ role: 'user', content: msg.content })
+    } else if (msg.role === 'assistant') {
+      if (msg.toolUse) {
+        // Reconstruct Tool Use and Tool Result
+        // We use the persisted toolUseId if available, otherwise fallback to deterministic ID
+        const toolUseId = msg.toolUse.toolUseId || `call_${msg.id.slice(0, 10)}`
+
+        // 1. Assistant Message with Tool Use
         messages.push({
           role: 'assistant',
           content: [
@@ -174,7 +194,7 @@ export async function agentLoop(
               type: 'tool_use',
               id: toolUseId,
               name: msg.toolUse.tool,
-              input: msg.toolUse.input as any
+              input: msg.toolUse.input
             }
           ]
         })
@@ -213,7 +233,10 @@ export async function agentLoop(
       max_tokens: maxTokens
     })
 
-    messages.push({ role: 'assistant', content: response.content as unknown as MessageParam['content'] })
+    messages.push({
+      role: 'assistant',
+      content: response.content as unknown as MessageParam['content']
+    })
 
     if (response.stop_reason !== 'tool_use') {
       return messages
@@ -234,7 +257,12 @@ export async function agentLoop(
         output = `Tool error (${toolUse.name}): ${msg}`
         opts.onToolResult?.(toolUse.name, output)
       }
-      results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: output, is_error: output.startsWith('Tool error') })
+      results.push({
+        type: 'tool_result',
+        tool_use_id: toolUse.id,
+        content: output,
+        is_error: output.startsWith('Tool error')
+      })
     }
     messages.push({ role: 'user', content: results })
   }
@@ -249,7 +277,12 @@ interface AgentHandlerOptions {
   sessionManager: SessionManager
 }
 
-export function registerAgentHandlers({ workspacePath, systemPromptManager, settingsManager, sessionManager }: AgentHandlerOptions): void {
+export function registerAgentHandlers({
+  workspacePath,
+  systemPromptManager,
+  settingsManager,
+  sessionManager
+}: AgentHandlerOptions): void {
   // IPC Handler for Agent Loop
   ipcMain.handle('agent-loop', async (_, messages: ChatMessage[]) => {
     try {
@@ -275,7 +308,7 @@ export function registerAgentHandlers({ workspacePath, systemPromptManager, sett
       })
 
       // 4. Run Agent Loop
-      
+
       // Extract user's last message and append to session
       const lastUserMsg = messages[messages.length - 1]
       if (lastUserMsg && lastUserMsg.role === 'user') {
@@ -309,13 +342,14 @@ export function registerAgentHandlers({ workspacePath, systemPromptManager, sett
             // Use event.sender instead of mainWindow
             const win = BrowserWindow.getAllWindows()[0]
             if (win) {
-              win.webContents.send('agent-update', { 
-                type: 'tool_use', 
-                tool: toolName, 
+              const update: AgentUpdate = {
+                type: 'tool_use',
+                tool: toolName,
                 input,
                 toolUseId,
                 message: msg
-              })
+              }
+              win.webContents.send('agent-update', update)
             }
 
             // Append to session
@@ -328,12 +362,13 @@ export function registerAgentHandlers({ workspacePath, systemPromptManager, sett
           try {
             const win = BrowserWindow.getAllWindows()[0]
             if (win) {
-              win.webContents.send('agent-update', { 
-                type: 'tool_result', 
-                tool: toolName, 
+              const update: AgentUpdate = {
+                type: 'tool_result',
+                tool: toolName,
                 output,
                 id: currentToolMsgId
-              })
+              }
+              win.webContents.send('agent-update', update)
             }
 
             if (currentToolMsgId && currentToolInput) {
@@ -354,8 +389,11 @@ export function registerAgentHandlers({ workspacePath, systemPromptManager, sett
         if (typeof lastMessage.content === 'string') {
           responseText = lastMessage.content
         } else if (Array.isArray(lastMessage.content)) {
-          const textBlock = (lastMessage.content as ContentBlock[]).find((block) => block.type === 'text')
-          responseText = textBlock && 'text' in textBlock ? (textBlock as { text: string }).text : ''
+          const textBlock = (lastMessage.content as ContentBlock[]).find(
+            (block) => block.type === 'text'
+          )
+          responseText =
+            textBlock && 'text' in textBlock ? (textBlock as { text: string }).text : ''
         }
 
         if (responseText) {

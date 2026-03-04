@@ -1,5 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import { ChatMessage } from '../common/types'
+import { ChatMessage, AgentUpdate } from '../common/types'
 
 interface FileEntry {
   name: string
@@ -18,7 +18,7 @@ declare global {
       agentLoop: (messages: ChatMessage[]) => Promise<string>
       readSession: () => Promise<ChatMessage[]>
       clearSession: () => Promise<void>
-      onAgentUpdate: (callback: (data: any) => void) => () => void
+      onAgentUpdate: (callback: (data: AgentUpdate) => void) => () => void
     }
   }
 }

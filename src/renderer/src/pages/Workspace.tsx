@@ -15,7 +15,9 @@ export default function Workspace(): React.JSX.Element {
 
   useEffect(() => {
     if (!window.api.readWorkspaceDir) {
-      setError('System update detected. Please restart the application to enable workspace features.')
+      setError(
+        'System update detected. Please restart the application to enable workspace features.'
+      )
       return
     }
     loadDirectory(currentPath)
@@ -29,7 +31,9 @@ export default function Workspace(): React.JSX.Element {
       setEntries(files)
     } catch (err) {
       console.error('Failed to load directory:', err)
-      setError(`Failed to load directory contents: ${err instanceof Error ? err.message : String(err)}`)
+      setError(
+        `Failed to load directory contents: ${err instanceof Error ? err.message : String(err)}`
+      )
     } finally {
       setLoading(false)
     }
@@ -91,17 +95,19 @@ export default function Workspace(): React.JSX.Element {
             <button
               onClick={() => handleBreadcrumbClick(-1)}
               className={`flex items-center hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${
-                !currentPath ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'
+                !currentPath
+                  ? 'font-bold text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-gray-400'
               }`}
               title="~/.catbot/workspace"
             >
               <Home size={16} className="mr-1" />
               Workspace
             </button>
-            
+
             {pathParts.map((part, index) => (
               <div key={`${index}-${part}`} className="flex items-center">
-                <ChevronRight size={16} className="text-gray-400 mx-1 flex-shrink-0" />
+                <ChevronRight size={16} className="text-gray-400 mx-1 shrink-0" />
                 <button
                   onClick={() => handleBreadcrumbClick(index)}
                   className={`hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors whitespace-nowrap ${
@@ -120,7 +126,7 @@ export default function Workspace(): React.JSX.Element {
         <button
           onClick={() => loadDirectory(currentPath)}
           disabled={loading}
-          className={`p-2 ml-2 rounded-lg transition-colors text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 flex-shrink-0 ${
+          className={`p-2 ml-2 rounded-lg transition-colors text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 ${
             loading ? 'animate-spin' : ''
           }`}
           title="Refresh"
@@ -132,13 +138,9 @@ export default function Workspace(): React.JSX.Element {
       {/* File List */}
       <div className="flex-1 overflow-auto p-4">
         {loading ? (
-          <div className="flex justify-center items-center h-full text-gray-400">
-            Loading...
-          </div>
+          <div className="flex justify-center items-center h-full text-gray-400">Loading...</div>
         ) : error ? (
-          <div className="flex justify-center items-center h-full text-red-500">
-            {error}
-          </div>
+          <div className="flex justify-center items-center h-full text-red-500">{error}</div>
         ) : entries.length === 0 ? (
           <div className="flex flex-col justify-center items-center h-full text-gray-400">
             <Folder size={48} className="mb-2 opacity-20" />
@@ -154,7 +156,11 @@ export default function Workspace(): React.JSX.Element {
               >
                 <div className="w-8 h-8 mb-1 flex items-center justify-center text-gray-400 group-hover:text-blue-500 transition-colors">
                   {entry.isDirectory ? (
-                    <Folder size={32} className="fill-current text-blue-100 dark:text-blue-900/50 stroke-blue-500" strokeWidth={1.5} />
+                    <Folder
+                      size={32}
+                      className="fill-current text-blue-100 dark:text-blue-900/50 stroke-blue-500"
+                      strokeWidth={1.5}
+                    />
                   ) : entry.name.endsWith('.md') || entry.name.endsWith('.txt') ? (
                     <FileText size={28} strokeWidth={1.5} />
                   ) : (

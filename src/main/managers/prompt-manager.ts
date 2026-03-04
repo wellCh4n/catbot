@@ -1,8 +1,9 @@
 import { join } from 'path'
 import { readFile, writeFile, access } from 'fs/promises'
 import { constants } from 'fs'
+import { DEFAULT_AGENTS_MD, DEFAULT_IDENTITY_MD } from '../prompts/default'
 
-export class SystemPromptManager {
+export class PromptManager {
   private identityPath: string
   private agentsPath: string
 
@@ -12,8 +13,8 @@ export class SystemPromptManager {
   }
 
   async init(): Promise<void> {
-    await this.ensureFileExists(this.identityPath, '# Identity\n\nYou are a helpful assistant.')
-    await this.ensureFileExists(this.agentsPath, '# Agents\n\nNo agents defined.')
+    await this.ensureFileExists(this.identityPath, DEFAULT_IDENTITY_MD)
+    await this.ensureFileExists(this.agentsPath, DEFAULT_AGENTS_MD)
   }
 
   private async ensureFileExists(filePath: string, defaultContent: string): Promise<void> {
@@ -29,9 +30,15 @@ export class SystemPromptManager {
     try {
       return await readFile(filePath, 'utf-8')
     } catch (error: unknown) {
-      const code = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: unknown }).code : undefined
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined
       if (code === 'ENOENT') {
-        const defaultContent = fileName === 'IDENTITY.md' ? '# Identity\n\nYou are a helpful assistant.' : '# Agents\n\nNo agents defined.'
+        const defaultContent =
+          fileName === 'IDENTITY.md'
+            ? DEFAULT_IDENTITY_MD
+            : DEFAULT_AGENTS_MD
         await writeFile(filePath, defaultContent, 'utf-8')
         return defaultContent
       }

@@ -5,7 +5,7 @@ export interface ChatMessage {
   timestamp: number
   toolUse?: {
     tool: string
-    input: unknown
+    input: Record<string, unknown>
     output?: string
     toolUseId?: string
   }
@@ -15,7 +15,7 @@ export interface ChatMessage {
 export interface AgentToolUseUpdate {
   type: 'tool_use'
   tool: string
-  input: unknown
+  input: Record<string, unknown>
   toolUseId: string
   message: ChatMessage
 }

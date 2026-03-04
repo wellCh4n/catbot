@@ -57,7 +57,10 @@ export class SettingsManager {
       const parsed = JSON.parse(content)
       return { ...DEFAULT_CONFIG, ...parsed }
     } catch (error: unknown) {
-      const code = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: unknown }).code : undefined
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined
       if (code === 'ENOENT') {
         await writeFile(this.configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf-8')
         return DEFAULT_CONFIG

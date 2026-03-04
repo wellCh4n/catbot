@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -7,8 +7,9 @@ import { registerSettingsHandlers } from './handlers/settings-handler'
 import { registerFileHandlers } from './handlers/files-handler'
 import { registerAgentHandlers } from './handlers/agent-handler'
 import { registerSessionHandlers } from './handlers/session-handler'
+import { registerPromptHandlers } from './handlers/prompt-handler'
 
-import { SystemPromptManager } from './managers/system-prompt-manager'
+import { PromptManager } from './managers/prompt-manager'
 import { SettingsManager } from './managers/settings-manager'
 import { SessionManager } from './managers/session-manager'
 import { WORKSPACE_PATH } from './configs'
@@ -34,6 +35,17 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('context-menu', () => {
+    const menu = Menu.buildFromTemplate([
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    ])
+    menu.popup({ window: mainWindow })
   })
 
   // HMR for renderer base on electron-vite cli.
@@ -66,17 +78,18 @@ app.whenReady().then(async () => {
   try {
     await mkdir(WORKSPACE_PATH, { recursive: true })
 
-    const systemPromptManager = new SystemPromptManager(WORKSPACE_PATH)
+    const promptManager = new PromptManager(WORKSPACE_PATH)
     const settingsManager = new SettingsManager(WORKSPACE_PATH)
     const sessionManager = new SessionManager(WORKSPACE_PATH)
 
     // Initialize managers (creates default files if needed)
-    await systemPromptManager.init()
+    await promptManager.init()
     await settingsManager.init()
     await sessionManager.init()
 
     // IPC Handlers for config files
-    registerSettingsHandlers(systemPromptManager, settingsManager)
+    registerPromptHandlers(promptManager)
+    registerSettingsHandlers(settingsManager)
 
     // IPC Handlers for Session
     registerSessionHandlers(sessionManager)
@@ -87,7 +100,7 @@ app.whenReady().then(async () => {
     // IPC Handler for Agent Loop
     registerAgentHandlers({
       workspacePath: WORKSPACE_PATH,
-      systemPromptManager,
+      promptManager,
       settingsManager,
       sessionManager
     })

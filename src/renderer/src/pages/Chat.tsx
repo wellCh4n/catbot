@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { UserCog, Loader2, Trash2 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { ChatMessage } from '../../../common/types'
@@ -8,6 +9,7 @@ import { AssistantMessage } from '../components/chat/assistant-message'
 import { ToolMessage } from '../components/chat/tool-message'
 
 export default function Chat(): React.JSX.Element {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false)
@@ -52,12 +54,12 @@ export default function Chat(): React.JSX.Element {
               input: data.input
             }
           }
-          setMessages(prev => [...prev, newMessage])
+          setMessages((prev) => [...prev, newMessage])
         } else if (data.type === 'tool_result') {
-          setMessages(prev => {
+          setMessages((prev) => {
             // Try to find by ID first
             if (data.id) {
-              const index = prev.findIndex(m => m.id === data.id)
+              const index = prev.findIndex((m) => m.id === data.id)
               if (index !== -1) {
                 const msg = prev[index]
                 const updated = {
@@ -73,8 +75,10 @@ export default function Chat(): React.JSX.Element {
             // Fallback: Find the last message that is a tool use of the same tool and has no output
             // We search from the end
             const reversed = [...prev].reverse()
-            const index = reversed.findIndex(m => m.toolUse && m.toolUse.tool === data.tool && !m.toolUse.output)
-            
+            const index = reversed.findIndex(
+              (m) => m.toolUse && m.toolUse.tool === data.tool && !m.toolUse.output
+            )
+
             if (index !== -1) {
               const realIndex = prev.length - 1 - index
               const msg = prev[realIndex]
@@ -97,8 +101,37 @@ export default function Chat(): React.JSX.Element {
 
   const handleSendMessage = async (e?: React.FormEvent): Promise<void> => {
     e?.preventDefault()
-    
+
     if (!inputValue.trim() || isLoading) return
+
+    // Check settings before sending
+    try {
+      const config = await window.api.readConfigFile('catbot.json')
+      const parsed: Record<string, unknown> = JSON.parse(config)
+      const model = parsed?.model || {}
+
+      const requiredFields = ['provider', 'apiKey', 'modelName', 'baseUrl']
+      const missingFields = requiredFields.filter((field) => !model[field])
+
+      if (missingFields.length > 0) {
+        if (
+          window.confirm(
+            '模型配置不完整，请先前往设置页面完善配置。\nModel configuration is incomplete. Go to settings?'
+          )
+        ) {
+          navigate('/settings')
+        }
+        return
+      }
+    } catch (error) {
+      console.error('Failed to validate settings:', error)
+      if (
+        window.confirm('无法读取配置文件，请检查设置。\nCannot read config file. Go to settings?')
+      ) {
+        navigate('/settings')
+      }
+      return
+    }
 
     const userMessage: ChatMessage = {
       id: uuidv4(),
@@ -108,7 +141,7 @@ export default function Chat(): React.JSX.Element {
     }
 
     // Optimistically add user message
-    setMessages(prev => [...prev, userMessage])
+    setMessages((prev) => [...prev, userMessage])
     setInputValue('')
     setIsLoading(true)
 
@@ -121,14 +154,14 @@ export default function Chat(): React.JSX.Element {
       const responseText = await window.api.agentLoop(history)
 
       const botResponse: ChatMessage = {
-        id: uuidv4(), // This ID will be different from what backend saves... 
+        id: uuidv4(), // This ID will be different from what backend saves...
         // Ideally backend should return the saved message or ID?
         // But for now we just display. On reload it will sync.
         content: responseText,
         role: 'assistant',
         timestamp: Date.now()
       }
-      setMessages(prev => [...prev, botResponse])
+      setMessages((prev) => [...prev, botResponse])
     } catch (error: unknown) {
       console.error('Chat error:', error)
       const msg = error instanceof Error ? error.message : String(error)
@@ -139,7 +172,7 @@ export default function Chat(): React.JSX.Element {
         timestamp: Date.now(),
         isError: true
       }
-      setMessages(prev => [...prev, errorMessage])
+      setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
@@ -154,7 +187,9 @@ export default function Chat(): React.JSX.Element {
   }
 
   const handleClearSession = async (): Promise<void> => {
-    if (window.confirm('此操作无法恢复，请谨慎操作。\nAre you sure you want to clear the session?')) {
+    if (
+      window.confirm('此操作无法恢复，请谨慎操作。\nAre you sure you want to clear the session?')
+    ) {
       await window.api.clearSession()
       setMessages([])
     }
@@ -184,10 +219,7 @@ export default function Chat(): React.JSX.Element {
       </header>
 
       {/* Persona Modal */}
-      <PersonaModal
-        isOpen={isPersonaModalOpen}
-        onClose={() => setIsPersonaModalOpen(false)}
-      />
+      <PersonaModal isOpen={isPersonaModalOpen} onClose={() => setIsPersonaModalOpen(false)} />
 
       {/* Chat History */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -220,6 +252,9 @@ export default function Chat(): React.JSX.Element {
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             disabled={isLoading}
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
             className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-200 dark:border-gray-700 placeholder-gray-400 dark:placeholder-gray-500 resize-none h-14 disabled:opacity-50 disabled:cursor-not-allowed"
             autoFocus
           />

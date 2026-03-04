@@ -4,8 +4,18 @@ import { AgentUpdate, ChatMessage } from '../common/types'
 
 // Custom APIs for renderer
 const api = {
-  readConfigFile: (fileName: string) => ipcRenderer.invoke('read-config-file', fileName),
-  writeConfigFile: (fileName: string, content: string) => ipcRenderer.invoke('write-config-file', fileName, content),
+  readConfigFile: (fileName: string) => {
+    if (fileName === 'IDENTITY.md' || fileName === 'AGENTS.md') {
+      return ipcRenderer.invoke('read-prompt', fileName)
+    }
+    return ipcRenderer.invoke('read-config-file', fileName)
+  },
+  writeConfigFile: (fileName: string, content: string) => {
+    if (fileName === 'IDENTITY.md' || fileName === 'AGENTS.md') {
+      return ipcRenderer.invoke('write-prompt', fileName, content)
+    }
+    return ipcRenderer.invoke('write-config-file', fileName, content)
+  },
   readWorkspaceDir: (subDir: string = '') => ipcRenderer.invoke('read-workspace-dir', subDir),
   openFile: (filePath: string) => ipcRenderer.invoke('open-file', filePath),
   agentLoop: (messages: ChatMessage[]) => ipcRenderer.invoke('agent-loop', messages),

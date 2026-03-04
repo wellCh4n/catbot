@@ -31,7 +31,7 @@ function MainLayout(): React.JSX.Element {
 
           // Toggle visibility based on current path
           const isVisible = location.pathname === route.path
-          
+
           return (
             <div
               key={route.path}

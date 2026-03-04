@@ -56,10 +56,16 @@ export default function Settings(): React.JSX.Element {
     try {
       const content = await window.api.readConfigFile('catbot.json')
       const parsed: unknown = JSON.parse(content)
-      const parsedRecord = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
-      const parsedModel = typeof parsedRecord.model === 'object' && parsedRecord.model !== null ? (parsedRecord.model as Record<string, unknown>) : {}
+      const parsedRecord =
+        typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+      const parsedModel =
+        typeof parsedRecord.model === 'object' && parsedRecord.model !== null
+          ? (parsedRecord.model as Record<string, unknown>)
+          : {}
       const parsedSystem =
-        typeof parsedRecord.system === 'object' && parsedRecord.system !== null ? (parsedRecord.system as Record<string, unknown>) : {}
+        typeof parsedRecord.system === 'object' && parsedRecord.system !== null
+          ? (parsedRecord.system as Record<string, unknown>)
+          : {}
 
       const merged: AppSettings = {
         model: { ...DEFAULT_SETTINGS.model, ...(parsedModel as Partial<ModelSettings>) },
@@ -93,14 +99,14 @@ export default function Settings(): React.JSX.Element {
   }
 
   const updateModelSetting = (key: keyof ModelSettings, value: string): void => {
-    setSettings(prev => ({
+    setSettings((prev) => ({
       ...prev,
       model: { ...prev.model, [key]: value }
     }))
   }
 
   const updateSystemTheme = (value: SystemSettings['theme']): void => {
-    setSettings(prev => ({
+    setSettings((prev) => ({
       ...prev,
       system: { ...prev.system, theme: value }
     }))
@@ -108,7 +114,7 @@ export default function Settings(): React.JSX.Element {
   }
 
   const updateSystemLanguage = (value: SystemSettings['language']): void => {
-    setSettings(prev => ({
+    setSettings((prev) => ({
       ...prev,
       system: { ...prev.system, language: value }
     }))
@@ -165,7 +171,9 @@ export default function Settings(): React.JSX.Element {
             {activeTab === 'model' ? (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Model Configuration</h2>
+                  <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                    Model Configuration
+                  </h2>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -236,7 +244,9 @@ export default function Settings(): React.JSX.Element {
             ) : (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">System Preferences</h2>
+                  <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                    System Preferences
+                  </h2>
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -244,7 +254,9 @@ export default function Settings(): React.JSX.Element {
                       </label>
                       <select
                         value={settings.system.theme}
-                        onChange={(e) => updateSystemTheme(e.target.value as SystemSettings['theme'])}
+                        onChange={(e) =>
+                          updateSystemTheme(e.target.value as SystemSettings['theme'])
+                        }
                         className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white"
                       >
                         <option value="system">Follow System</option>

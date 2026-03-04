@@ -2,7 +2,8 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve, isAbsolute, relative } from 'node:path'
+import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import Anthropic from '@anthropic-ai/sdk'
 import type {
@@ -12,7 +13,7 @@ import type {
   ToolResultBlockParam,
   ToolUseBlock
 } from '@anthropic-ai/sdk/resources/messages'
-import { SystemPromptManager } from '../managers/system-prompt-manager'
+import { PromptManager } from '../managers/prompt-manager'
 import { SettingsManager } from '../managers/settings-manager'
 import { SessionManager } from '../managers/session-manager'
 import { ChatMessage, AgentUpdate } from '../../common/types'
@@ -72,17 +73,43 @@ export interface AgentLoopOptions {
   workspacePath: string
   maxTokens?: number
   maxSteps?: number
-  onToolUse?: (toolName: string, input: unknown, toolUseId: string) => void | Promise<void>
+  onToolUse?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    toolUseId: string
+  ) => void | Promise<void>
   onToolResult?: (toolName: string, output: string) => void | Promise<void>
 }
 
-function resolveWorkspacePath(workspacePath: string, inputPath: string): string {
-  const full = resolve(join(workspacePath, inputPath))
-  const base = resolve(workspacePath)
-  if (full !== base && !full.startsWith(base + sep)) {
-    throw new Error('Access denied')
+function resolveWorkspacePath(
+  inputPath: string,
+  workspacePath?: string,
+  allowedDir?: string
+): string {
+  // 1. Expand user home directory (~)
+  let p = inputPath
+  if (p.startsWith('~')) {
+    p = join(homedir(), p.slice(1))
   }
-  return full
+
+  // 2. Resolve absolute path
+  let resolvedPath: string
+  if (!isAbsolute(p) && workspacePath) {
+    resolvedPath = resolve(workspacePath, p)
+  } else {
+    resolvedPath = resolve(p)
+  }
+
+  // 3. Enforce directory restriction
+  if (allowedDir) {
+    const allowed = resolve(allowedDir)
+    const rel = relative(allowed, resolvedPath)
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      throw new Error(`Path ${inputPath} is outside allowed directory ${allowedDir}`)
+    }
+  }
+
+  return resolvedPath
 }
 
 function limitText(text: string, limit: number): string {
@@ -133,8 +160,9 @@ export function createToolHandlers(workspacePath: string): Record<string, ToolHa
       const parsed =
         typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
       const filePath = resolveWorkspacePath(
+        typeof parsed.path === 'string' ? parsed.path : '',
         workspacePath,
-        typeof parsed.path === 'string' ? parsed.path : ''
+        workspacePath
       )
       const content = await readFile(filePath, 'utf-8')
       const limit = typeof parsed.limit === 'number' ? parsed.limit : 2000
@@ -144,8 +172,9 @@ export function createToolHandlers(workspacePath: string): Record<string, ToolHa
       const parsed =
         typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
       const filePath = resolveWorkspacePath(
+        typeof parsed.path === 'string' ? parsed.path : '',
         workspacePath,
-        typeof parsed.path === 'string' ? parsed.path : ''
+        workspacePath
       )
       const content = typeof parsed.content === 'string' ? parsed.content : ''
       await writeFile(filePath, content, 'utf-8')
@@ -155,8 +184,9 @@ export function createToolHandlers(workspacePath: string): Record<string, ToolHa
       const parsed =
         typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
       const filePath = resolveWorkspacePath(
+        typeof parsed.path === 'string' ? parsed.path : '',
         workspacePath,
-        typeof parsed.path === 'string' ? parsed.path : ''
+        workspacePath
       )
       const oldText = typeof parsed.old_text === 'string' ? parsed.old_text : ''
       const newText = typeof parsed.new_text === 'string' ? parsed.new_text : ''
@@ -249,7 +279,7 @@ export async function agentLoop(
       const handler = handlers[toolUse.name]
       let output: string
       try {
-        await opts.onToolUse?.(toolUse.name, toolUse.input, toolUse.id)
+        await opts.onToolUse?.(toolUse.name, toolUse.input as Record<string, unknown>, toolUse.id)
         output = handler ? await handler(toolUse.input) : `Unknown tool: ${toolUse.name}`
         await opts.onToolResult?.(toolUse.name, output)
       } catch (err: unknown) {
@@ -272,14 +302,14 @@ export async function agentLoop(
 
 interface AgentHandlerOptions {
   workspacePath: string
-  systemPromptManager: SystemPromptManager
+  promptManager: PromptManager
   settingsManager: SettingsManager
   sessionManager: SessionManager
 }
 
 export function registerAgentHandlers({
   workspacePath,
-  systemPromptManager,
+  promptManager,
   settingsManager,
   sessionManager
 }: AgentHandlerOptions): void {
@@ -298,8 +328,9 @@ export function registerAgentHandlers({
         throw new Error('Agent Loop currently only supports Anthropic provider')
       }
 
-      // 2. Read System Prompt (Identity)
-      const identityPrompt = await systemPromptManager.read('IDENTITY.md')
+      // 2. Read System Prompt (Identity & Agents)
+      const identityPrompt = await promptManager.read('IDENTITY.md')
+      const agentsPrompt = await promptManager.read('AGENTS.md')
 
       // 3. Initialize Client
       const client = new Anthropic({
@@ -316,12 +347,12 @@ export function registerAgentHandlers({
       }
 
       let currentToolMsgId: string | undefined
-      let currentToolInput: unknown | undefined
+      let currentToolInput: Record<string, unknown> | undefined
 
       const finalMessages = await agentLoop(messages, {
         client,
         model: modelName || 'claude-3-opus-20240229',
-        system: SYSTEM_PROMPT + '\n' + identityPrompt,
+        system: SYSTEM_PROMPT + '\n' + identityPrompt + '\n' + agentsPrompt,
         workspacePath,
         maxSteps: 10, // reasonable default
         onToolUse: async (toolName, input, toolUseId) => {

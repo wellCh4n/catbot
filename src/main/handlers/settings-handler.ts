@@ -1,15 +1,9 @@
 import { ipcMain } from 'electron'
-import { SystemPromptManager } from '../managers/system-prompt-manager'
 import { SettingsManager } from '../managers/settings-manager'
 
-export function registerSettingsHandlers(
-  systemPromptManager: SystemPromptManager,
-  settingsManager: SettingsManager
-): void {
+export function registerSettingsHandlers(settingsManager: SettingsManager): void {
   ipcMain.handle('read-config-file', async (_, fileName: string) => {
-    if (fileName === 'IDENTITY.md' || fileName === 'AGENTS.md') {
-      return await systemPromptManager.read(fileName)
-    } else if (fileName === 'catbot.json') {
+    if (fileName === 'catbot.json') {
       const config = await settingsManager.read()
       return JSON.stringify(config, null, 2)
     } else {
@@ -18,9 +12,7 @@ export function registerSettingsHandlers(
   })
 
   ipcMain.handle('write-config-file', async (_, fileName: string, content: string) => {
-    if (fileName === 'IDENTITY.md' || fileName === 'AGENTS.md') {
-      await systemPromptManager.update(fileName, content)
-    } else if (fileName === 'catbot.json') {
+    if (fileName === 'catbot.json') {
       await settingsManager.update(content)
     } else {
       throw new Error('Invalid file name')

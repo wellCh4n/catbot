@@ -35,10 +35,7 @@ export class PromptManager {
           ? (error as { code?: unknown }).code
           : undefined
       if (code === 'ENOENT') {
-        const defaultContent =
-          fileName === 'IDENTITY.md'
-            ? DEFAULT_IDENTITY_MD
-            : DEFAULT_AGENTS_MD
+        const defaultContent = fileName === 'IDENTITY.md' ? DEFAULT_IDENTITY_MD : DEFAULT_AGENTS_MD
         await writeFile(filePath, defaultContent, 'utf-8')
         return defaultContent
       }

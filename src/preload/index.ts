@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { AgentUpdate, ChatMessage } from '../common/types'
 
+export interface SkillListItem {
+  name: string
+  description: string
+  source: 'workspace' | 'builtin'
+}
+
 // Custom APIs for renderer
 const api = {
   readConfigFile: (fileName: string) => {
@@ -21,6 +27,8 @@ const api = {
   agentLoop: (messages: ChatMessage[]) => ipcRenderer.invoke('agent-loop', messages),
   readSession: () => ipcRenderer.invoke('read-session'),
   clearSession: () => ipcRenderer.invoke('clear-session'),
+  listSkills: (opts?: { filterUnavailable?: boolean }) =>
+    ipcRenderer.invoke('list-skills', opts) as Promise<SkillListItem[]>,
   onAgentUpdate: (callback: (data: AgentUpdate) => void): (() => void) => {
     const listener = (_event: unknown, value: AgentUpdate): void => callback(value)
     ipcRenderer.on('agent-update', listener)

@@ -25,7 +25,7 @@ export class SessionManager {
   async read(): Promise<ChatMessage[]> {
     try {
       const content = await readFile(this.sessionPath, 'utf-8')
-      const lines = content.split('\n').filter(line => line.trim() !== '')
+      const lines = content.split('\n').filter((line) => line.trim() !== '')
       return lines.map((line, index) => {
         const msg = JSON.parse(line)
         if (!msg.id) msg.id = `legacy-${index}`
@@ -50,7 +50,7 @@ export class SessionManager {
   async update(id: string, updates: Partial<ChatMessage>): Promise<void> {
     try {
       const messages = await this.read()
-      const index = messages.findIndex(m => m.id === id)
+      const index = messages.findIndex((m) => m.id === id)
       if (index !== -1) {
         messages[index] = { ...messages[index], ...updates }
         await this.writeAll(messages)
@@ -69,7 +69,7 @@ export class SessionManager {
   }
 
   private async writeAll(messages: ChatMessage[]): Promise<void> {
-    const content = messages.map(m => JSON.stringify(m)).join('\n') + '\n'
+    const content = messages.map((m) => JSON.stringify(m)).join('\n') + '\n'
     await writeFile(this.sessionPath, content, 'utf-8')
   }
 }

@@ -11,18 +11,18 @@ export default function Sidebar(): React.JSX.Element {
     { path: '/workspace', icon: Folder, label: 'Workspace' }
   ]
 
-  const bottomNavItems = [
-    { path: '/settings', icon: Settings, label: 'Settings' }
-  ]
+  const bottomNavItems = [{ path: '/settings', icon: Settings, label: 'Settings' }]
 
   return (
-    <div 
+    <div
       className={`flex flex-col h-screen bg-gray-100 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 ${
         isExpanded ? 'w-64' : 'w-16'
       }`}
     >
       <div className="flex items-center justify-between p-4 h-16">
-        {isExpanded && <span className="font-bold text-xl text-gray-900 dark:text-white">CatBot</span>}
+        {isExpanded && (
+          <span className="font-bold text-xl text-gray-900 dark:text-white">CatBot</span>
+        )}
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="p-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"

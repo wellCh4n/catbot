@@ -7,6 +7,12 @@ interface FileEntry {
   path: string
 }
 
+interface SkillListItem {
+  name: string
+  description: string
+  source: 'workspace' | 'builtin'
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI
@@ -18,6 +24,7 @@ declare global {
       agentLoop: (messages: ChatMessage[]) => Promise<string>
       readSession: () => Promise<ChatMessage[]>
       clearSession: () => Promise<void>
+      listSkills: (opts?: { filterUnavailable?: boolean }) => Promise<SkillListItem[]>
       onAgentUpdate: (callback: (data: AgentUpdate) => void) => () => void
     }
   }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Folder, FileText, File, ArrowLeft, ChevronRight, Home, RefreshCw } from 'lucide-react'
 
 interface FileEntry {
@@ -8,6 +9,7 @@ interface FileEntry {
 }
 
 export default function Workspace(): React.JSX.Element {
+  const location = useLocation()
   const [currentPath, setCurrentPath] = useState('')
   const [entries, setEntries] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -22,6 +24,12 @@ export default function Workspace(): React.JSX.Element {
     }
     loadDirectory(currentPath)
   }, [currentPath])
+
+  useEffect(() => {
+    if (location.pathname === '/workspace') {
+      loadDirectory(currentPath)
+    }
+  }, [location.pathname, currentPath])
 
   const loadDirectory = async (path: string): Promise<void> => {
     setLoading(true)

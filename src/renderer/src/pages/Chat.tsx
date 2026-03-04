@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UserCog, Loader2, Trash2 } from 'lucide-react'
+import { UserCog, Loader2, Trash2, Send as SendIcon } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { ChatMessage } from '../../../common/types'
 import { PersonaModal } from '../components/persona-modal'
@@ -15,10 +15,17 @@ export default function Chat(): React.JSX.Element {
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const isHydratingHistoryRef = useRef(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const scrollToBottom = (): void => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const scrollToBottom = (behavior: ScrollBehavior): void => {
+    messagesEndRef.current?.scrollIntoView({ behavior })
   }
+
+  const focusInput = useCallback((): void => {
+    if (isPersonaModalOpen) return
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [isPersonaModalOpen])
 
   useEffect(() => {
     const loadSession = async (): Promise<void> => {
@@ -26,6 +33,7 @@ export default function Chat(): React.JSX.Element {
         const history = await window.api.readSession()
         if (history && history.length > 0) {
           // Use history directly since Message is now just ChatMessage
+          isHydratingHistoryRef.current = true
           setMessages(history)
         }
       } catch (error) {
@@ -36,8 +44,13 @@ export default function Chat(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, isLoading])
+    const behavior: ScrollBehavior = isHydratingHistoryRef.current ? 'auto' : 'smooth'
+    scrollToBottom(behavior)
+    if (isHydratingHistoryRef.current) {
+      isHydratingHistoryRef.current = false
+    }
+    focusInput()
+  }, [messages, isLoading, focusInput])
 
   useEffect(() => {
     if (window.api?.onAgentUpdate) {
@@ -101,6 +114,7 @@ export default function Chat(): React.JSX.Element {
 
   const handleSendMessage = async (e?: React.FormEvent): Promise<void> => {
     e?.preventDefault()
+    focusInput()
 
     if (!inputValue.trim() || isLoading) return
 
@@ -144,6 +158,7 @@ export default function Chat(): React.JSX.Element {
     setMessages((prev) => [...prev, userMessage])
     setInputValue('')
     setIsLoading(true)
+    focusInput()
 
     try {
       // Prepare history for LLM
@@ -175,6 +190,7 @@ export default function Chat(): React.JSX.Element {
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      focusInput()
     }
   }
 
@@ -247,23 +263,30 @@ export default function Chat(): React.JSX.Element {
       <div className="flex-none p-4 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
         <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
           <textarea
+            ref={inputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
-            disabled={isLoading}
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-200 dark:border-gray-700 placeholder-gray-400 dark:placeholder-gray-500 resize-none h-14 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-200 dark:border-gray-700 placeholder-gray-400 dark:placeholder-gray-500 resize-none h-14"
             autoFocus
           />
           <button
             type="submit"
             disabled={!inputValue.trim() || isLoading}
-            className="h-14 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 rounded-lg font-medium transition-colors flex items-center justify-center"
+            className="h-14 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
           >
-            {isLoading ? <Loader2 className="animate-spin" size={20} /> : 'Send'}
+            {isLoading ? (
+              <Loader2 className="animate-spin" size={20} />
+            ) : (
+              <>
+                <span>Send</span>
+                <SendIcon size={18} />
+              </>
+            )}
           </button>
         </form>
       </div>

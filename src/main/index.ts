@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, Menu } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,6 +9,7 @@ import { registerFileHandlers } from './handlers/files-handler'
 import { registerAgentHandlers } from './handlers/agent-handler'
 import { registerSessionHandlers } from './handlers/session-handler'
 import { registerPromptHandlers } from './handlers/prompt-handler'
+import { registerSkillsHandlers } from './handlers/skills-handler'
 
 import { PromptManager } from './managers/prompt-manager'
 import { SettingsManager } from './managers/settings-manager'
@@ -38,14 +40,22 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('context-menu', () => {
-    const menu = Menu.buildFromTemplate([
-      { role: 'cut' },
-      { role: 'copy' },
-      { role: 'paste' },
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    // Only show edit menu for editable fields or selected text
+    const hasSelection = Boolean(params.selectionText && params.selectionText.trim())
+    if (!params.isEditable && !hasSelection) return
+
+    const template: MenuItemConstructorOptions[] = [
+      { role: 'undo', enabled: params.editFlags.canUndo },
+      { role: 'redo', enabled: params.editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
       { type: 'separator' },
       { role: 'selectAll' }
-    ])
+    ]
+    const menu = Menu.buildFromTemplate(template)
     menu.popup({ window: mainWindow })
   })
 
@@ -97,6 +107,9 @@ app.whenReady().then(async () => {
 
     // IPC Handlers for Workspace
     registerFileHandlers(WORKSPACE_PATH)
+
+    // IPC Handlers for Skills
+    registerSkillsHandlers(WORKSPACE_PATH)
 
     // IPC Handler for Agent Loop
     registerAgentHandlers({

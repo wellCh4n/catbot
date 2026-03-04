@@ -16,6 +16,7 @@ import type {
 import { PromptManager } from '../managers/prompt-manager'
 import { SettingsManager } from '../managers/settings-manager'
 import { SessionManager } from '../managers/session-manager'
+import { SkillsManager } from '../managers/skills-manager'
 import { ChatMessage, AgentUpdate } from '../../common/types'
 import { SYSTEM_PROMPT } from '../prompts/prompt'
 
@@ -29,6 +30,15 @@ export const TOOLS: Tool[] = [
       type: 'object',
       properties: { command: { type: 'string' } },
       required: ['command']
+    }
+  },
+  {
+    name: 'load_skill',
+    description: 'Load skill content by skill name.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' }, limit: { type: 'integer' } },
+      required: ['name']
     }
   },
   {
@@ -118,6 +128,8 @@ function limitText(text: string, limit: number): string {
 }
 
 export function createToolHandlers(workspacePath: string): Record<string, ToolHandler> {
+  const skillsManager = new SkillsManager(workspacePath)
+
   return {
     bash: async (input: unknown) => {
       const parsed =
@@ -155,6 +167,18 @@ export function createToolHandlers(workspacePath: string): Record<string, ToolHa
         const output = (error.stdout || '') + (error.stderr || '')
         return `Error: ${msg}\n${output}`.trim().slice(0, 50000)
       }
+    },
+    load_skill: async (input: unknown) => {
+      const parsed =
+        typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+      const name = typeof parsed.name === 'string' ? parsed.name : ''
+      if (!name.trim()) throw new Error('name is required')
+
+      const content = await skillsManager.loadSkill(name)
+      if (!content) throw new Error(`Skill not found: ${name}`)
+
+      const limit = typeof parsed.limit === 'number' ? parsed.limit : 50000
+      return limitText(content, limit)
     },
     read_file: async (input: unknown) => {
       const parsed =
@@ -255,6 +279,7 @@ export async function agentLoop(
   const maxTokens = typeof opts.maxTokens === 'number' ? opts.maxTokens : 8000
 
   for (let step = 0; step < maxSteps; step++) {
+    console.log(`[agentLoop] step=${step + 1}/${maxSteps} messages=${messages.length}`)
     const response = await opts.client.messages.create({
       model: opts.model,
       system: opts.system,
@@ -262,6 +287,10 @@ export async function agentLoop(
       tools: TOOLS,
       max_tokens: maxTokens
     })
+
+    console.log(
+      `[agentLoop] step=${step + 1} stop_reason=${response.stop_reason} content_blocks=${response.content.length}`
+    )
 
     messages.push({
       role: 'assistant',
@@ -271,6 +300,11 @@ export async function agentLoop(
     if (response.stop_reason !== 'tool_use') {
       return messages
     }
+
+    const toolNames = (response.content as ContentBlock[])
+      .filter((b) => b.type === 'tool_use')
+      .map((b) => (b as ToolUseBlock).name)
+    console.log(`[agentLoop] step=${step + 1} tool_use=${toolNames.join(',') || '(none)'}`)
 
     const results: ToolResultBlockParam[] = []
     for (const block of response.content as ContentBlock[]) {
@@ -313,9 +347,14 @@ export function registerAgentHandlers({
   settingsManager,
   sessionManager
 }: AgentHandlerOptions): void {
+  const skillsManager = new SkillsManager(workspacePath)
+
   // IPC Handler for Agent Loop
   ipcMain.handle('agent-loop', async (_, messages: ChatMessage[]) => {
+    const startedAt = Date.now()
     try {
+      console.log(`[agent-loop] start messages=${messages.length}`)
+
       // 1. Read Config
       const config = await settingsManager.read()
       const { provider, apiKey, baseUrl, modelName } = config.model
@@ -327,6 +366,10 @@ export function registerAgentHandlers({
       if (provider !== 'anthropic') {
         throw new Error('Agent Loop currently only supports Anthropic provider')
       }
+
+      console.log(
+        `[agent-loop] config provider=${provider} model=${modelName || '(default)'} baseUrl=${baseUrl || '(default)'}`
+      )
 
       // 2. Read System Prompt (Identity & Agents)
       const identityPrompt = await promptManager.read('IDENTITY.md')
@@ -349,14 +392,34 @@ export function registerAgentHandlers({
       let currentToolMsgId: string | undefined
       let currentToolInput: Record<string, unknown> | undefined
 
+      const skillsSummary = await skillsManager.buildSkillsSummary()
+      const alwaysSkills = await skillsManager.getAlwaysSkills()
+      const alwaysSkillsContent = await skillsManager.loadSkillsForContext(alwaysSkills)
+      const skillsContext = [skillsSummary, alwaysSkillsContent].filter(Boolean).join('\n\n')
+      const system = [SYSTEM_PROMPT, identityPrompt, agentsPrompt, skillsContext]
+        .filter(Boolean)
+        .join('\n\n')
+
+      console.log(
+        `[agent-loop] system identity=${identityPrompt.length} agents=${agentsPrompt.length} skills_summary=${skillsSummary.length} always_skills=${alwaysSkills.length} always_skills_content=${alwaysSkillsContent.length} total=${system.length}`
+      )
+      if (process.env.DEBUG_SYSTEM_PROMPT === '1') {
+        console.log('System Prompt:', system)
+      }
+
       const finalMessages = await agentLoop(messages, {
         client,
         model: modelName || 'claude-3-opus-20240229',
-        system: SYSTEM_PROMPT + '\n' + identityPrompt + '\n' + agentsPrompt,
+        system,
         workspacePath,
-        maxSteps: 10, // reasonable default
+        maxSteps: 50, // reasonable default
         onToolUse: async (toolName, input, toolUseId) => {
           try {
+            const inputKeys = input && typeof input === 'object' ? Object.keys(input) : []
+            console.log(
+              `[agent-loop] tool_use name=${toolName} id=${toolUseId} input_keys=${inputKeys.join(',') || '(none)'}`
+            )
+
             const id = randomUUID()
             currentToolMsgId = id
             currentToolInput = input
@@ -391,6 +454,10 @@ export function registerAgentHandlers({
         },
         onToolResult: async (toolName, output) => {
           try {
+            console.log(
+              `[agent-loop] tool_result name=${toolName} bytes=${Buffer.byteLength(output || '', 'utf-8')} error=${output.startsWith('Tool error')}`
+            )
+
             const win = BrowserWindow.getAllWindows()[0]
             if (win) {
               const update: AgentUpdate = {
@@ -435,13 +502,18 @@ export function registerAgentHandlers({
             timestamp: Date.now()
           }
           await sessionManager.append(msg)
+          console.log(
+            `[agent-loop] done duration_ms=${Date.now() - startedAt} response_chars=${responseText.length}`
+          )
           return responseText
         }
       }
+      console.log(`[agent-loop] done duration_ms=${Date.now() - startedAt} response_chars=0`)
       return ''
     } catch (error: unknown) {
       console.error('Agent Loop Failed:', error)
       const msg = error instanceof Error ? error.message : String(error)
+      console.log(`[agent-loop] failed duration_ms=${Date.now() - startedAt} message=${msg}`)
       throw new Error(msg || 'Failed to run agent loop')
     }
   })

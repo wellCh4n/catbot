@@ -93,7 +93,7 @@ export default function Workspace(): React.JSX.Element {
             className={`p-1 mr-2 rounded-lg transition-colors ${
               !currentPath
                 ? 'text-gray-300 dark:text-gray-700 cursor-not-allowed'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer'
             }`}
           >
             <ArrowLeft size={20} />
@@ -102,7 +102,7 @@ export default function Workspace(): React.JSX.Element {
           <div className="flex items-center text-sm overflow-x-auto no-scrollbar">
             <button
               onClick={() => handleBreadcrumbClick(-1)}
-              className={`flex items-center hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors ${
+              className={`flex items-center hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors cursor-pointer ${
                 !currentPath
                   ? 'font-bold text-gray-900 dark:text-white'
                   : 'text-gray-500 dark:text-gray-400'
@@ -118,7 +118,7 @@ export default function Workspace(): React.JSX.Element {
                 <ChevronRight size={16} className="text-gray-400 mx-1 shrink-0" />
                 <button
                   onClick={() => handleBreadcrumbClick(index)}
-                  className={`hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors whitespace-nowrap ${
+                  className={`hover:bg-gray-200 dark:hover:bg-gray-700 px-2 py-1 rounded transition-colors whitespace-nowrap cursor-pointer ${
                     index === pathParts.length - 1
                       ? 'font-bold text-gray-900 dark:text-white'
                       : 'text-gray-500 dark:text-gray-400'
@@ -134,7 +134,7 @@ export default function Workspace(): React.JSX.Element {
         <button
           onClick={() => loadDirectory(currentPath)}
           disabled={loading}
-          className={`p-2 ml-2 rounded-lg transition-colors text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 ${
+          className={`p-2 ml-2 rounded-lg transition-colors text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer ${
             loading ? 'animate-spin' : ''
           }`}
           title="Refresh"

@@ -48,7 +48,7 @@ export function AssistantMessage({ message }: AssistantMessageProps): React.JSX.
           </span>
           <button
             onClick={handleCopy}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
             title="Copy message"
           >
             {copied ? <Check size={14} /> : <Copy size={14} />}

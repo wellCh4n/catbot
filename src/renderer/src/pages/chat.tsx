@@ -219,14 +219,14 @@ export default function Chat(): React.JSX.Element {
         <div className="flex gap-2">
           <button
             onClick={handleClearSession}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors hover:text-red-500 dark:hover:text-red-400"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors hover:text-red-500 dark:hover:text-red-400 cursor-pointer"
             title="Clear Session"
           >
             <Trash2 size={20} />
           </button>
           <button
             onClick={() => setIsPersonaModalOpen(true)}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors cursor-pointer"
             title="Set Persona"
           >
             <UserCog size={20} />

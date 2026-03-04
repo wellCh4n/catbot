@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
+import { RotateCw } from 'lucide-react'
 
 type SkillListItem = {
   name: string
@@ -37,21 +38,17 @@ export default function Skills(): React.JSX.Element {
     }
   }, [location.pathname, loadSkills])
 
-  const counts = useMemo(() => {
-    const workspace = skills.filter((s) => s.source === 'workspace').length
-    const builtin = skills.filter((s) => s.source === 'builtin').length
-    return { workspace, builtin, total: skills.length }
-  }, [skills])
-
   return (
-    <div className="p-8 h-full overflow-auto">
-      <div className="flex items-end justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Skills</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            总计 {counts.total}，工作区 {counts.workspace}，内置 {counts.builtin}
-          </p>
-        </div>
+    <div className="p-4 h-full overflow-auto">
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={loadSkills}
+          disabled={isLoading}
+          className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+          title="Refresh Skills"
+        >
+          <RotateCw size={20} className={isLoading ? 'animate-spin' : ''} />
+        </button>
       </div>
 
       {isLoading && <div className="text-gray-600 dark:text-gray-400 text-sm">Loading...</div>}

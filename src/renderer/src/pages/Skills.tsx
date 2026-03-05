@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { RotateCw } from 'lucide-react'
+import { RotateCw, FolderOpen, Plus, Trash2 } from 'lucide-react'
 import { SkillInfo } from '../../../common/types'
+import { AddSkillModal } from '../components/add-skill-modal'
 
 export default function Skills(): React.JSX.Element {
   const location = useLocation()
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [deletingSkill, setDeletingSkill] = useState<string | null>(null)
 
   const loadSkills = useCallback(async (): Promise<void> => {
     try {
@@ -23,6 +26,23 @@ export default function Skills(): React.JSX.Element {
     }
   }, [])
 
+  const handleDeleteSkill = async (name: string): Promise<void> => {
+    if (!window.confirm(`Are you sure you want to delete the skill "${name}"?`)) {
+      return
+    }
+
+    try {
+      setDeletingSkill(name)
+      await window.api.deleteSkill(name)
+      await loadSkills()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`Failed to delete skill: ${msg}`)
+    } finally {
+      setDeletingSkill(null)
+    }
+  }
+
   useEffect(() => {
     loadSkills()
   }, [loadSkills])
@@ -36,6 +56,20 @@ export default function Skills(): React.JSX.Element {
   return (
     <div className="p-4 h-full overflow-auto">
       <div className="flex justify-end mb-4">
+        <button
+          onClick={() => setIsAddModalOpen(true)}
+          className="p-2 mr-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+          title="Add Skill"
+        >
+          <Plus size={20} />
+        </button>
+        <button
+          onClick={() => window.api.openSkillsDir()}
+          className="p-2 mr-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+          title="Open Skills Directory"
+        >
+          <FolderOpen size={20} />
+        </button>
         <button
           onClick={loadSkills}
           disabled={isLoading}
@@ -61,7 +95,7 @@ export default function Skills(): React.JSX.Element {
           {skills.map((skill) => (
             <div
               key={`${skill.source}:${skill.name}`}
-              className="border border-gray-200 dark:border-gray-800 rounded-lg p-4 bg-white dark:bg-gray-900"
+              className="group relative border border-gray-200 dark:border-gray-800 rounded-lg p-4 bg-white dark:bg-gray-900"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -87,10 +121,29 @@ export default function Skills(): React.JSX.Element {
                   {skill.source === 'workspace' ? 'workspace' : 'builtin'}
                 </span>
               </div>
+              {skill.source === 'workspace' && (
+                <button
+                  onClick={() => handleDeleteSkill(skill.name)}
+                  disabled={deletingSkill === skill.name}
+                  className="absolute bottom-2 right-2 p-2 text-gray-400 hover:text-red-600 dark:text-gray-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  title="Delete Skill"
+                >
+                  <Trash2
+                    size={16}
+                    className={deletingSkill === skill.name ? 'animate-spin' : ''}
+                  />
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
+
+      <AddSkillModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={loadSkills}
+      />
     </div>
   )
 }

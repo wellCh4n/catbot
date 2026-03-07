@@ -19,6 +19,10 @@ export interface ChannelConfig {
   feishu: {
     appId: string
     appSecret: string
+    encryptKey?: string
+    verificationToken?: string
+    port?: number
+    enabled?: boolean
   }
   [key: string]: unknown
 }
@@ -43,7 +47,11 @@ const DEFAULT_CONFIG: AppConfig = {
   channel: {
     feishu: {
       appId: '',
-      appSecret: ''
+      appSecret: '',
+      encryptKey: '',
+      verificationToken: '',
+      port: 3000,
+      enabled: false
     }
   }
 }

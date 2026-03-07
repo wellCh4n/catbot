@@ -35,7 +35,7 @@ export function ToolMessage({ message }: ToolMessageProps): React.JSX.Element {
                   message.toolUse.output !== undefined
                     ? 'bg-green-500'
                     : 'bg-blue-500 animate-pulse'
-                } -translate-y-[1px]`}
+                } -translate-y-px`}
               />
               <span>Tool Use: {message.toolUse.tool}</span>
             </div>

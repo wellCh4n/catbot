@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { MessageSquare, Zap, Settings, Menu, ChevronLeft, Folder } from 'lucide-react'
+import { MessageSquare, Zap, Settings, Menu, ChevronLeft, Folder, Radio } from 'lucide-react'
 import { useState } from 'react'
 
 export default function Sidebar(): React.JSX.Element {
@@ -9,7 +9,7 @@ export default function Sidebar(): React.JSX.Element {
     { path: '/', icon: MessageSquare, label: 'Chat' },
     { path: '/skills', icon: Zap, label: 'Skills' },
     { path: '/workspace', icon: Folder, label: 'Workspace' },
-    // { path: '/channels', icon: Radio, label: 'Channel' }
+    { path: '/channels', icon: Radio, label: 'Channel' }
   ]
 
   const bottomNavItems = [{ path: '/settings', icon: Settings, label: 'Settings' }]

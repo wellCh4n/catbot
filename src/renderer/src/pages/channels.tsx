@@ -6,13 +6,14 @@ interface ChannelConfig {
   name: string
   type: 'feishu'
   icon: React.ElementType
-  config: Record<string, string>
+  config: Record<string, string | boolean>
 }
 
 export default function Channels(): React.JSX.Element {
   const [selectedChannel, setSelectedChannel] = useState<string>('feishu')
-  const [configs, setConfigs] = useState<Record<string, Record<string, string>>>({
+  const [configs, setConfigs] = useState<Record<string, Record<string, string | boolean>>>({
     feishu: {
+      enabled: false,
       appId: '',
       appSecret: ''
     }
@@ -22,12 +23,13 @@ export default function Channels(): React.JSX.Element {
     const loadConfig = async (): Promise<void> => {
       try {
         const config = (await window.api.getChannelConfig()) as {
-          feishu?: { appId: string; appSecret: string }
+          feishu?: { enabled?: boolean; appId: string; appSecret: string }
         }
         if (config && config.feishu) {
           setConfigs((prev) => ({
             ...prev,
             feishu: {
+              enabled: config.feishu?.enabled || false,
               appId: config.feishu?.appId || '',
               appSecret: config.feishu?.appSecret || ''
             }
@@ -50,7 +52,7 @@ export default function Channels(): React.JSX.Element {
     }
   ]
 
-  const handleConfigChange = (channelId: string, key: string, value: string): void => {
+  const handleConfigChange = (channelId: string, key: string, value: string | boolean): void => {
     setConfigs((prev) => ({
       ...prev,
       [channelId]: {
@@ -80,7 +82,7 @@ export default function Channels(): React.JSX.Element {
       <div className="w-64 bg-white dark:bg-gray-900 rounded-r-lg flex flex-col shadow-sm border-y border-r border-gray-200/50 dark:border-gray-700/50 overflow-hidden">
         <div className="p-4 bg-gray-50/50 dark:bg-gray-800/50">
           <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-            Platforms
+            Channels
           </h2>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -88,14 +90,19 @@ export default function Channels(): React.JSX.Element {
             <button
               key={channel.id}
               onClick={() => setSelectedChannel(channel.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
                 selectedChannel === channel.id
                   ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
             >
-              <channel.icon size={18} />
-              {channel.name}
+              <div className="flex items-center gap-3">
+                <channel.icon size={18} />
+                {channel.name}
+              </div>
+              {channel.config.enabled && (
+                <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]" />
+              )}
             </button>
           ))}
         </div>
@@ -107,27 +114,42 @@ export default function Channels(): React.JSX.Element {
           <div className="p-8 max-w-3xl mx-auto">
             {selectedChannel === 'feishu' && (
               <div className="space-y-8">
-                <div className="flex items-start gap-4 pb-6 border-b border-gray-100 dark:border-gray-800">
-                  <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                    <MessageCircle className="w-8 h-8 text-blue-500" />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">飞书配置</h2>
-                    <p className="mt-1 text-gray-500 dark:text-gray-400">
-                      配置飞书机器人的 App ID 和 App Secret 以启用连接。
-                    </p>
-                  </div>
-                </div>
-
                 <div className="space-y-6">
-                  <div className="grid gap-6">
+                  <div className="flex items-center justify-between py-4 border-b border-gray-100 dark:border-gray-800">
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                        启用飞书机器人
+                      </h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        开启后，CatBot 将通过飞书接收和回复消息
+                      </p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        handleConfigChange('feishu', 'enabled', !configs.feishu.enabled)
+                      }
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                        configs.feishu.enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          configs.feishu.enabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div
+                    className={`grid gap-6 transition-opacity duration-200 ${configs.feishu.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}
+                  >
                     <div className="space-y-2">
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                         App ID
                       </label>
                       <input
                         type="text"
-                        value={configs.feishu.appId}
+                        value={configs.feishu.appId as string}
                         onChange={(e) => handleConfigChange('feishu', 'appId', e.target.value)}
                         placeholder="cli_..."
                         className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-gray-900 dark:text-white placeholder-gray-400"
@@ -140,7 +162,7 @@ export default function Channels(): React.JSX.Element {
                       </label>
                       <input
                         type="password"
-                        value={configs.feishu.appSecret}
+                        value={configs.feishu.appSecret as string}
                         onChange={(e) => handleConfigChange('feishu', 'appSecret', e.target.value)}
                         placeholder="Your App Secret"
                         className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-gray-900 dark:text-white placeholder-gray-400"

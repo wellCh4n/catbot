@@ -58,6 +58,8 @@ export default function Settings(): React.JSX.Element {
       const parsed: unknown = JSON.parse(content)
       const parsedRecord =
         typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+      
+      // Store complete parsed config to preserve other fields (like channels)
       const parsedModel =
         typeof parsedRecord.model === 'object' && parsedRecord.model !== null
           ? (parsedRecord.model as Record<string, unknown>)
@@ -84,9 +86,28 @@ export default function Settings(): React.JSX.Element {
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     try {
+      // Read current config first to preserve other fields
+      let currentConfig: Record<string, unknown> = {}
+      try {
+        const content = await window.api.readConfigFile('catbot.json')
+        const parsed = JSON.parse(content)
+        if (typeof parsed === 'object' && parsed !== null) {
+          currentConfig = parsed
+        }
+      } catch {
+        // Ignore read error, start with empty object
+      }
+
+      // Merge current settings into existing config
+      const newConfig = {
+        ...currentConfig,
+        model: settings.model,
+        system: settings.system
+      }
+
       // Artificial delay for better UX
       await Promise.all([
-        window.api.writeConfigFile('catbot.json', JSON.stringify(settings, null, 2)),
+        window.api.writeConfigFile('catbot.json', JSON.stringify(newConfig, null, 2)),
         new Promise<void>((resolve) => setTimeout(resolve, 800))
       ])
       setOriginalSettings(JSON.stringify(settings))
@@ -141,7 +162,7 @@ export default function Settings(): React.JSX.Element {
         <nav className="flex-1 overflow-y-auto p-2 space-y-1">
           <button
             onClick={() => setActiveTab('model')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
               activeTab === 'model'
                 ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -152,7 +173,7 @@ export default function Settings(): React.JSX.Element {
           </button>
           <button
             onClick={() => setActiveTab('system')}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
               activeTab === 'system'
                 ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm'
                 : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'

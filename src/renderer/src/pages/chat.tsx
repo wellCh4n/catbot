@@ -54,6 +54,21 @@ export default function Chat(): React.JSX.Element {
   }, [messages, isLoading, focusInput])
 
   useEffect(() => {
+    if (window.api?.onAgentMessage) {
+      const cleanup = window.api.onAgentMessage((msg) => {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) {
+            return prev
+          }
+          return [...prev, msg]
+        })
+      })
+      return cleanup
+    }
+    return undefined
+  }, [])
+
+  useEffect(() => {
     if (window.api?.onAgentUpdate) {
       const cleanup = window.api.onAgentUpdate((data) => {
         if (data.type === 'tool_use') {
@@ -113,7 +128,7 @@ export default function Chat(): React.JSX.Element {
     return undefined
   }, [])
 
-  const handleSendMessage = async (e?: React.FormEvent): Promise<void> => {
+  const handleSendMessage = async (e?: React.SyntheticEvent): Promise<void> => {
     e?.preventDefault()
     focusInput()
 
@@ -167,17 +182,7 @@ export default function Chat(): React.JSX.Element {
       const history = [...messages, userMessage]
 
       // Call agent loop (it will handle session appending)
-      const responseText = await window.api.agentLoop(history)
-
-      const botResponse: ChatMessage = {
-        id: uuidv4(), // This ID will be different from what backend saves...
-        // Ideally backend should return the saved message or ID?
-        // But for now we just display. On reload it will sync.
-        content: responseText,
-        role: 'assistant',
-        timestamp: Date.now()
-      }
-      setMessages((prev) => [...prev, botResponse])
+      await window.api.agentLoop(history)
     } catch (error: unknown) {
       console.error('Chat error:', error)
       const msg = error instanceof Error ? error.message : String(error)

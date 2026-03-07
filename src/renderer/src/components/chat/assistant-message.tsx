@@ -41,7 +41,7 @@ export function AssistantMessage({ message }: AssistantMessageProps): React.JSX.
             rehypePlugins={[rehypeHighlight]}
             components={{
               pre: ({ node, ...props }) => (
-                <pre {...props} className="!p-0" key={node?.position?.start.line} />
+                <pre {...props} className="p-0!" key={node?.position?.start.line} />
               )
             }}
           >

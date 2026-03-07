@@ -17,11 +17,14 @@ import { SettingsManager } from './managers/settings-manager'
 import { SessionManager } from './managers/session-manager'
 import { SkillsManager } from './managers/skills-manager'
 import { ChannelManager } from './managers/channel-manager'
+import { AgentManager } from './managers/agent-manager'
 import { WORKSPACE_PATH } from './configs'
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fixPath = require('fix-path').default
 fixPath()
+
+let channelManager: ChannelManager | undefined
 
 function createWindow(): void {
   // Create the browser window.
@@ -101,13 +104,22 @@ app.whenReady().then(async () => {
     const settingsManager = new SettingsManager()
     const sessionManager = new SessionManager()
     const skillsManager = new SkillsManager()
-    const channelManager = new ChannelManager(settingsManager)
+    channelManager = new ChannelManager(settingsManager)
 
     // Initialize managers (creates default files if needed)
     await promptManager.init()
     await settingsManager.init()
     await sessionManager.init()
     await skillsManager.init()
+
+    const agentManager = new AgentManager({
+      promptManager,
+      settingsManager,
+      sessionManager
+    })
+
+    // Set AgentManager for ChannelManager
+    channelManager.setAgentManager(agentManager)
 
     // IPC Handlers for config files
     registerPromptHandlers(promptManager)
@@ -124,12 +136,10 @@ app.whenReady().then(async () => {
     registerSkillsHandlers(skillsManager)
 
     // IPC Handler for Agent Loop
-    registerAgentHandlers({
-      workspacePath: WORKSPACE_PATH,
-      promptManager,
-      settingsManager,
-      sessionManager
-    })
+    registerAgentHandlers(agentManager)
+
+    // Start Channels
+    await channelManager.init()
   } catch (err) {
     console.error('Failed to initialize workspace:', err)
   }
@@ -147,10 +157,10 @@ app.whenReady().then(async () => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  if (channelManager) {
+    channelManager.stop()
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

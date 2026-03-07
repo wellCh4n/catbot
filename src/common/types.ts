@@ -42,5 +42,9 @@ export interface ChannelConfig {
   feishu: {
     appId: string
     appSecret: string
+    encryptKey?: string
+    verificationToken?: string
+    port?: number
+    enabled?: boolean
   }
 }

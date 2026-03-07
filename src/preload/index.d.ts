@@ -32,6 +32,7 @@ declare global {
       getChannelConfig: (channelId?: string) => Promise<ChannelConfig | unknown>
       updateChannelConfig: (channelId: string, config: unknown) => Promise<void>
       onAgentUpdate: (callback: (data: AgentUpdate) => void) => () => void
+      onAgentMessage: (callback: (data: ChatMessage) => void) => () => void
     }
   }
 }

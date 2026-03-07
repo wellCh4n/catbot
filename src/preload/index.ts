@@ -46,6 +46,11 @@ const api = {
     const listener = (_event: unknown, value: AgentUpdate): void => callback(value)
     ipcRenderer.on('agent-update', listener)
     return () => ipcRenderer.removeListener('agent-update', listener)
+  },
+  onAgentMessage: (callback: (data: ChatMessage) => void): (() => void) => {
+    const listener = (_event: unknown, value: ChatMessage): void => callback(value)
+    ipcRenderer.on('agent-message', listener)
+    return () => ipcRenderer.removeListener('agent-message', listener)
   }
 }
 

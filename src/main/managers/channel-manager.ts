@@ -51,12 +51,12 @@ export class ChannelManager {
 
   async updateChannelConfig(channelConfig: ChannelConfig): Promise<void> {
     const config = await this.settingsManager.read()
-    
+
     // Check if Feishu enabled state changed
     const feishuWasEnabled = config.channel?.feishu?.enabled
     const oldFeishuConfig = config.channel?.feishu
     const feishuIsEnabled = channelConfig.feishu?.enabled
-    
+
     // Update config first
     config.channel = channelConfig
     await this.settingsManager.update(config)

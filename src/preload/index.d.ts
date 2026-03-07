@@ -25,14 +25,17 @@ declare global {
       installSkillZip: (zipPath: string, force?: boolean) => Promise<string>
       selectSkillZip: () => Promise<string | null>
       deleteSkill: (name: string) => Promise<void>
-      agentLoop: (messages: ChatMessage[]) => Promise<string>
-      readSession: () => Promise<ChatMessage[]>
-      clearSession: () => Promise<void>
+      agentLoop: (messages: ChatMessage[], sessionId?: string) => Promise<string>
+      readSession: (sessionId?: string) => Promise<ChatMessage[]>
+      clearSession: (sessionId?: string) => Promise<void>
+      deleteSession: (sessionId: string) => Promise<void>
+      listSessions: () => Promise<string[]>
       listSkills: (opts?: { filterUnavailable?: boolean }) => Promise<SkillListItem[]>
       getChannelConfig: (channelId?: string) => Promise<ChannelConfig | unknown>
       updateChannelConfig: (channelId: string, config: unknown) => Promise<void>
-      onAgentUpdate: (callback: (data: AgentUpdate) => void) => () => void
-      onAgentMessage: (callback: (data: ChatMessage) => void) => () => void
+      onAgentUpdate: (callback: (data: AgentUpdate, sessionId: string) => void) => () => void
+      onAgentMessage: (callback: (data: ChatMessage, sessionId: string) => void) => () => void
+      onSessionCreated: (callback: (sessionId: string) => void) => () => void
     }
   }
 }

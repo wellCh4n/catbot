@@ -97,7 +97,7 @@ export class FeishuChannel {
 
       // Run Agent
       // Note: We are not maintaining history for now, just 1-turn conversation
-      const response = await this.agentManager.run([userMsg], async (update) => {
+      const response = await this.agentManager.run('feishu', [userMsg], async (update) => {
         await this.handleUpdate(chatId, update)
       })
 

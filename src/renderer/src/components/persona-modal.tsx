@@ -49,7 +49,7 @@ export function PersonaModal({ isOpen, onClose }: PersonaModalProps): React.JSX.
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-4xl h-[80vh] border border-gray-200 dark:border-gray-800 flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-          <h2 className="text-lg font-bold">Configuration</h2>
+          <h2 className="text-lg font-bold">Agent Configuration</h2>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
@@ -89,7 +89,7 @@ export function PersonaModal({ isOpen, onClose }: PersonaModalProps): React.JSX.
               <textarea
                 value={fileContent}
                 onChange={(e) => setFileContent(e.target.value)}
-                className="w-full h-full bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white font-mono text-sm rounded-lg p-4 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                className="w-full h-full bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white font-mono text-sm rounded-lg p-4 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-transparent resize-none"
                 spellCheck={false}
               />
             </div>

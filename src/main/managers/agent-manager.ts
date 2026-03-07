@@ -111,10 +111,14 @@ export class AgentManager extends EventEmitter {
     this.skillsManager = new SkillsManager()
   }
 
-  async run(messages: ChatMessage[], onUpdate?: (update: AgentUpdate) => void): Promise<string> {
+  async run(
+    sessionId: string,
+    messages: ChatMessage[],
+    onUpdate?: (update: AgentUpdate) => void
+  ): Promise<string> {
     const startedAt = Date.now()
     try {
-      console.log(`[agent-manager] start messages=${messages.length}`)
+      console.log(`[agent-manager] start messages=${messages.length} session=${sessionId}`)
 
       // 1. Read Config
       const config = await this.settingsManager.read()
@@ -147,8 +151,8 @@ export class AgentManager extends EventEmitter {
       // Extract user's last message and append to session
       const lastUserMsg = messages[messages.length - 1]
       if (lastUserMsg && lastUserMsg.role === 'user') {
-        await this.sessionManager.append(lastUserMsg)
-        this.emit('message', lastUserMsg)
+        await this.sessionManager.append(lastUserMsg, sessionId)
+        this.emit('message', { message: lastUserMsg, sessionId })
       }
 
       let currentToolMsgId: string | undefined
@@ -214,15 +218,18 @@ ${skillsContext}`
               onUpdate(update)
             }
             this.emit('update', {
-              type: 'tool_use',
-              tool: toolName,
-              input,
-              toolUseId,
-              message: msg
+              update: {
+                type: 'tool_use',
+                tool: toolName,
+                input,
+                toolUseId,
+                message: msg
+              },
+              sessionId
             })
 
             // Append to session
-            await this.sessionManager.append(msg)
+            await this.sessionManager.append(msg, sessionId)
           } catch (e) {
             console.error('Failed to send tool_use update', e)
           }
@@ -243,10 +250,13 @@ ${skillsContext}`
               onUpdate(update)
             }
             this.emit('update', {
-              type: 'tool_result',
-              tool: toolName,
-              output,
-              id: currentToolMsgId
+              update: {
+                type: 'tool_result',
+                tool: toolName,
+                output,
+                id: currentToolMsgId
+              },
+              sessionId
             })
 
             if (currentToolMsgId && currentToolInput) {
@@ -281,8 +291,8 @@ ${skillsContext}`
             content: responseText,
             timestamp: Date.now()
           }
-          await this.sessionManager.append(msg)
-          this.emit('message', msg)
+          await this.sessionManager.append(msg, sessionId)
+          this.emit('message', { message: msg, sessionId })
           console.log(
             `[agent-manager] done duration_ms=${Date.now() - startedAt} response_chars=${responseText.length}`
           )

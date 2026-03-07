@@ -29,9 +29,12 @@ const api = {
     ipcRenderer.invoke('install-skill-zip', zipPath, force),
   selectSkillZip: () => ipcRenderer.invoke('select-skill-zip'),
   deleteSkill: (name: string) => ipcRenderer.invoke('delete-skill', name),
-  agentLoop: (messages: ChatMessage[]) => ipcRenderer.invoke('agent-loop', messages),
-  readSession: () => ipcRenderer.invoke('read-session'),
-  clearSession: () => ipcRenderer.invoke('clear-session'),
+  agentLoop: (messages: ChatMessage[], sessionId?: string) =>
+    ipcRenderer.invoke('agent-loop', { messages, sessionId }),
+  readSession: (sessionId?: string) => ipcRenderer.invoke('read-session', sessionId),
+  clearSession: (sessionId?: string) => ipcRenderer.invoke('clear-session', sessionId),
+  deleteSession: (sessionId: string) => ipcRenderer.invoke('delete-session', sessionId),
+  listSessions: () => ipcRenderer.invoke('list-sessions'),
   listSkills: (opts?: { filterUnavailable?: boolean }) =>
     ipcRenderer.invoke('list-skills', opts) as Promise<SkillListItem[]>,
   getChannelConfig: (channelId?: string) => {
@@ -42,15 +45,22 @@ const api = {
   },
   updateChannelConfig: (channelId: string, config: unknown) =>
     ipcRenderer.invoke('channel:update-by-id', { channelId, config }),
-  onAgentUpdate: (callback: (data: AgentUpdate) => void): (() => void) => {
-    const listener = (_event: unknown, value: AgentUpdate): void => callback(value)
+  onAgentUpdate: (callback: (data: AgentUpdate, sessionId: string) => void): (() => void) => {
+    const listener = (_event: unknown, { update, sessionId }: { update: AgentUpdate; sessionId: string }): void =>
+      callback(update, sessionId)
     ipcRenderer.on('agent-update', listener)
     return () => ipcRenderer.removeListener('agent-update', listener)
   },
-  onAgentMessage: (callback: (data: ChatMessage) => void): (() => void) => {
-    const listener = (_event: unknown, value: ChatMessage): void => callback(value)
+  onAgentMessage: (callback: (data: ChatMessage, sessionId: string) => void): (() => void) => {
+    const listener = (_event: unknown, { message, sessionId }: { message: ChatMessage; sessionId: string }): void =>
+      callback(message, sessionId)
     ipcRenderer.on('agent-message', listener)
     return () => ipcRenderer.removeListener('agent-message', listener)
+  },
+  onSessionCreated: (callback: (sessionId: string) => void): (() => void) => {
+    const listener = (_event: unknown, sessionId: string): void => callback(sessionId)
+    ipcRenderer.on('session-created', listener)
+    return () => ipcRenderer.removeListener('session-created', listener)
   }
 }
 

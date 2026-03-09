@@ -3,7 +3,7 @@
  * Main interface for searching conversation history and memory files
  */
 
-import { readFile, readdir, stat } from 'fs/promises'
+import { readFile, readdir } from 'fs/promises'
 import { join, extname } from 'path'
 import { randomUUID } from 'crypto'
 import { VectorStore } from './vector-store'
@@ -16,8 +16,7 @@ import type {
   MemorySearchConfig,
   MemoryChunk,
   MemorySearchOptions,
-  MemorySearchResult,
-  MemorySource
+  MemorySearchResult
 } from './types'
 import type { ChatMessage } from '../../common/types'
 
@@ -143,7 +142,7 @@ export class MemorySearchEngine {
 
     // Apply MMR if enabled
     if (this.config.query.hybrid.mmr.enabled && this.config.store.vector.enabled) {
-      finalResults = this.applyMMR(finalResults, queryEmbedding)
+      finalResults = this.applyMMR(finalResults)
     }
 
     // Filter by minimum score and limit
@@ -163,7 +162,9 @@ export class MemorySearchEngine {
       // Enforce cache size limit
       if (this.config.cache.maxEntries && this.cache.size > this.config.cache.maxEntries) {
         const firstKey = this.cache.keys().next().value
-        this.cache.delete(firstKey)
+        if (firstKey) {
+          this.cache.delete(firstKey)
+        }
       }
     }
 
@@ -396,8 +397,7 @@ export class MemorySearchEngine {
    * Apply Maximal Marginal Relevance (MMR) for diversity
    */
   private applyMMR(
-    results: Array<{ chunk: MemoryChunk; score: number }>,
-    queryEmbedding: number[]
+    results: Array<{ chunk: MemoryChunk; score: number }>
   ): Array<{ chunk: MemoryChunk; score: number }> {
     if (results.length === 0) return results
 

@@ -4,7 +4,6 @@
  */
 
 import Database from 'better-sqlite3'
-import { randomUUID } from 'crypto'
 import type { MemoryChunk, VectorStoreOptions } from './types'
 
 export class VectorStore {

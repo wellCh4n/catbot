@@ -195,7 +195,11 @@ export class AgentManager extends EventEmitter {
                 onSearch: false, // Disable sync on every search for performance
                 watch: false,
                 watchDebounceMs: 1500,
-                intervalMinutes: 0
+                intervalMinutes: 0,
+                sessions: {
+                  deltaBytes: 100_000,
+                  deltaMessages: 50
+                }
               }
             },
             this.settingsManager
@@ -402,44 +406,86 @@ ${skillsContext}`,
     // Convert ChatMessage[] to MessageParam[] for Anthropic
     const messages: MessageParam[] = []
 
-    for (const msg of initialMessages) {
+    for (let i = 0; i < initialMessages.length; i++) {
+      const msg = initialMessages[i]
+
       if (msg.role === 'user') {
         if (msg.toolUse?.output !== undefined) {
-          // This is a tool result message
-          const toolUseId = msg.toolUse.toolUseId || `call_${msg.id.slice(0, 10)}`
-          messages.push({
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: toolUseId,
-                content: msg.toolUse.output,
-                is_error: false
-              }
-            ]
-          })
+          // This is a tool result message - skip it, will be handled with tool use
+          continue
         } else {
           // Standard User Message
           messages.push({ role: 'user', content: msg.content })
         }
       } else if (msg.role === 'assistant') {
-        if (msg.toolUse) {
+        if (msg.toolUse && !msg.toolUse.output) {
           // Assistant Message with Tool Use
           const toolUseId = msg.toolUse.toolUseId || `call_${msg.id.slice(0, 10)}`
+
+          // Build content blocks
+          const contentBlocks: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }> = []
+
+          // Add text block if content is not empty
+          if (msg.content && msg.content.trim()) {
+            contentBlocks.push({ type: 'text', text: msg.content })
+          }
+
+          // Add tool use block
+          contentBlocks.push({
+            type: 'tool_use',
+            id: toolUseId,
+            name: msg.toolUse.tool,
+            input: msg.toolUse.input
+          })
+
           messages.push({
             role: 'assistant',
-            content: [
-              { type: 'text', text: msg.content },
-              {
-                type: 'tool_use',
-                id: toolUseId,
-                name: msg.toolUse.tool,
-                input: msg.toolUse.input
-              }
-            ]
+            content: contentBlocks as any
           })
+
+          // Look for the corresponding tool result in the next user messages
+          let foundResult = false
+          for (let j = i + 1; j < initialMessages.length; j++) {
+            const nextMsg = initialMessages[j]
+            if (
+              nextMsg.role === 'user' &&
+              nextMsg.toolUse?.output !== undefined &&
+              nextMsg.toolUse?.toolUseId === toolUseId
+            ) {
+              // Found matching tool result
+              messages.push({
+                role: 'user',
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: toolUseId,
+                    content: nextMsg.toolUse.output,
+                    is_error: nextMsg.toolUse.output.startsWith('Tool error') || nextMsg.toolUse.output.startsWith('Error:')
+                  }
+                ]
+              })
+              foundResult = true
+              break
+            }
+          }
+
+          // If no result found, add an error result to maintain message sequence
+          if (!foundResult) {
+            console.warn(`[agentLoop] No tool result found for tool use ${toolUseId}, adding error result`)
+            messages.push({
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: toolUseId,
+                  content: 'Error: Tool result not found in session history',
+                  is_error: true
+                }
+              ]
+            })
+          }
         } else {
-          // Standard Assistant Message
+          // Standard Assistant Message (no tool use)
           messages.push({ role: 'assistant', content: msg.content })
         }
       }
@@ -449,8 +495,13 @@ ${skillsContext}`,
     const maxSteps = typeof opts.maxSteps === 'number' ? opts.maxSteps : 20
     const maxTokens = typeof opts.maxTokens === 'number' ? opts.maxTokens : 8000
 
-    console.log(`[agentLoop] system=${opts.system}`)
-    console.log(`[agentLoop] messages=${JSON.stringify(messages)}`)
+    console.log(`[agentLoop] Converted ${initialMessages.length} chat messages to ${messages.length} API messages`)
+    if (process.env.DEBUG_MESSAGES === '1') {
+      console.log(`[agentLoop] messages=${JSON.stringify(messages, null, 2)}`)
+    }
+
+    // Validate message sequence
+    this.validateMessageSequence(messages)
 
     for (let step = 0; step < maxSteps; step++) {
       console.log(`[agentLoop] step=${step + 1}/${maxSteps} messages=${messages.length}`)
@@ -638,5 +689,59 @@ ${skillsContext}`,
   private limitText(text: string, limit: number): string {
     if (limit <= 0) return ''
     return text.length > limit ? text.slice(0, limit) : text
+  }
+
+  /**
+   * Validate message sequence for Anthropic API compatibility
+   * Ensures messages alternate between user and assistant, and tool calls are properly paired
+   */
+  private validateMessageSequence(messages: MessageParam[]): void {
+    if (messages.length === 0) return
+
+    // First message must be user
+    if (messages[0].role !== 'user') {
+      console.warn('[agentLoop] First message is not user, this may cause issues')
+    }
+
+    // Check for alternating roles and proper tool call pairing
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]
+
+      // Check role alternation
+      if (i > 0) {
+        const prevMsg = messages[i - 1]
+        if (msg.role === prevMsg.role) {
+          console.warn(
+            `[agentLoop] Message ${i}: Same role as previous (${msg.role}), this may cause API errors`
+          )
+        }
+      }
+
+      // Check tool_use/tool_result pairing
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+        const hasToolUse = msg.content.some((block: any) => block.type === 'tool_use')
+        if (hasToolUse) {
+          // Next message must be user with tool_result
+          const nextMsg = messages[i + 1]
+          if (!nextMsg || nextMsg.role !== 'user') {
+            console.error(
+              `[agentLoop] Message ${i}: Assistant has tool_use but next message is not user`
+            )
+            throw new Error('Invalid message sequence: tool_use must be followed by user message with tool_result')
+          }
+          if (Array.isArray(nextMsg.content)) {
+            const hasToolResult = nextMsg.content.some((block: any) => block.type === 'tool_result')
+            if (!hasToolResult) {
+              console.error(
+                `[agentLoop] Message ${i + 1}: User message after tool_use does not contain tool_result`
+              )
+              throw new Error('Invalid message sequence: user message after tool_use must contain tool_result')
+            }
+          }
+        }
+      }
+    }
+
+    console.log('[agentLoop] Message sequence validation passed')
   }
 }

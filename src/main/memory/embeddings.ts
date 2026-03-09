@@ -4,7 +4,6 @@
  */
 
 import type { MemorySearchConfig } from './types'
-import type { SettingsManager } from '../managers/settings-manager'
 
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>

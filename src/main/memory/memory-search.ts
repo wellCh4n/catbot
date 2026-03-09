@@ -4,8 +4,9 @@
  */
 
 import { readFile, readdir } from 'fs/promises'
-import { join, extname } from 'path'
+import { join, extname, dirname } from 'path'
 import { randomUUID } from 'crypto'
+import { mkdir } from 'fs/promises'
 import { VectorStore } from './vector-store'
 import { createEmbeddingProvider, type EmbeddingProvider, embedBatch } from './embeddings'
 import { resolveMemorySearchConfig } from './config'
@@ -22,8 +23,8 @@ import type { ChatMessage } from '../../common/types'
 
 export class MemorySearchEngine {
   private config: MemorySearchConfig
-  private vectorStore: VectorStore
-  private embeddingProvider: EmbeddingProvider
+  private vectorStore?: VectorStore
+  private embeddingProvider?: EmbeddingProvider
   private sessionManager: SessionManager
   private settingsManager: SettingsManager
   private initialized: boolean = false
@@ -35,17 +36,9 @@ export class MemorySearchEngine {
     settingsManager?: SettingsManager
   ) {
     this.config = resolveMemorySearchConfig(sessionId, config)
-    this.vectorStore = new VectorStore({
-      path: this.config.store.path,
-      vectorEnabled: this.config.store.vector.enabled,
-      extensionPath: this.config.store.vector.extensionPath
-    })
     this.sessionManager = new SessionManager()
     this.settingsManager = settingsManager || new SettingsManager()
     this.cache = new Map()
-
-    // We'll initialize embeddingProvider in init() after getting API key from settings
-    this.embeddingProvider = null as any
 
     console.log('[MemorySearch] Initialized with config:', {
       provider: this.config.provider,
@@ -62,6 +55,24 @@ export class MemorySearchEngine {
     if (this.initialized) return
 
     console.log('[MemorySearch] Starting initialization...')
+
+    // Ensure memory directory exists
+    const memoryDir = dirname(this.config.store.path)
+    try {
+      await mkdir(memoryDir, { recursive: true })
+      console.log(`[MemorySearch] Ensured directory exists: ${memoryDir}`)
+    } catch (error) {
+      console.error(`[MemorySearch] Failed to create directory: ${memoryDir}`, error)
+      throw error
+    }
+
+    // Create VectorStore (will create SQLite database)
+    this.vectorStore = new VectorStore({
+      path: this.config.store.path,
+      vectorEnabled: this.config.store.vector.enabled,
+      extensionPath: this.config.store.vector.extensionPath
+    })
+    console.log(`[MemorySearch] Vector store created at: ${this.config.store.path}`)
 
     // Get API key from chat settings
     let settingsApiKey: string | undefined
@@ -91,9 +102,13 @@ export class MemorySearchEngine {
    * Search across configured memory sources
    */
   async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
-    if (!this.initialized) {
+    if (!this.initialized || !this.vectorStore || !this.embeddingProvider) {
       await this.init()
     }
+
+    // Now these are guaranteed to be defined
+    const vectorStore = this.vectorStore!
+    const embeddingProvider = this.embeddingProvider!
 
     const {
       query,
@@ -118,18 +133,18 @@ export class MemorySearchEngine {
     }
 
     // Generate query embedding
-    const [queryEmbedding] = await this.embeddingProvider.embed([query])
+    const [queryEmbedding] = await embeddingProvider.embed([query])
 
     // Perform hybrid search
     const results = this.config.query.hybrid.enabled && this.config.store.vector.enabled
-      ? this.vectorStore.searchHybrid(query, queryEmbedding, {
+      ? vectorStore.searchHybrid(query, queryEmbedding, {
           limit: maxResults * 2, // Get more for filtering
           vectorWeight: this.config.query.hybrid.vectorWeight,
           textWeight: this.config.query.hybrid.textWeight,
           sourceTypes: sources
         })
       : // Fallback to text search only
-        this.vectorStore.searchText(query, maxResults * 2, sources).map((chunk) => ({
+        vectorStore.searchText(query, maxResults * 2, sources).map((chunk) => ({
           chunk,
           score: 0.5 // Default score for text-only search
         }))
@@ -235,6 +250,11 @@ export class MemorySearchEngine {
    * Index a single file
    */
   private async indexFile(filePath: string): Promise<void> {
+    if (!this.vectorStore || !this.embeddingProvider) {
+      console.warn('[MemorySearch] Not initialized, skipping indexFile')
+      return
+    }
+
     try {
       const content = await readFile(filePath, 'utf-8')
       const chunks = this.chunkText(content)
@@ -269,6 +289,11 @@ export class MemorySearchEngine {
    * Index conversation messages
    */
   private async indexMessages(messages: ChatMessage[], sessionId: string): Promise<void> {
+    if (!this.vectorStore || !this.embeddingProvider) {
+      console.warn('[MemorySearch] Not initialized, skipping indexMessages')
+      return
+    }
+
     const chunks: MemoryChunk[] = []
 
     for (const message of messages) {
@@ -454,7 +479,9 @@ export class MemorySearchEngine {
    * Close and cleanup
    */
   close(): void {
-    this.vectorStore.close()
+    if (this.vectorStore) {
+      this.vectorStore.close()
+    }
     this.cache.clear()
   }
 }

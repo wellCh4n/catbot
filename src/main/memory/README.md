@@ -24,8 +24,8 @@ src/main/memory/
 ├── embeddings.ts      # Embedding 提供商
 ├── vector-store.ts    # SQLite 向量存储
 ├── memory-search.ts   # 主搜索引擎
-├── examples.ts        # 使用示例
-└── index.ts           # 导出模块
+├── index.ts           # 导出模块
+└── README.md          # 文档
 ```
 
 ## 快速开始
@@ -34,16 +34,15 @@ src/main/memory/
 
 ```typescript
 import { MemorySearchEngine } from './memory'
+import { SettingsManager } from '../managers/settings-manager'
 
-// 初始化
+// 初始化（会自动从 catbot.json 获取 API Key）
+const settingsManager = new SettingsManager()
 const memorySearch = new MemorySearchEngine('main', {
   enabled: true,
   provider: 'openai',
-  model: 'text-embedding-3-small',
-  remote: {
-    apiKey: process.env.OPENAI_API_KEY
-  }
-})
+  model: 'text-embedding-3-small'
+}, settingsManager)
 
 await memorySearch.init()
 
@@ -61,6 +60,11 @@ for (const result of results) {
 
 memorySearch.close()
 ```
+
+**注意**: API Key 优先级：
+1. `config.remote.apiKey` (传入的配置)
+2. `catbot.json` 中的 `model.apiKey` (Chat 配置)
+3. `process.env.OPENAI_API_KEY` (环境变量)
 
 ### 2. 集成到 AgentManager
 
@@ -120,10 +124,9 @@ async run(sessionId: string, message: ChatMessage): Promise<string> {
 {
   provider: 'openai',
   model: 'text-embedding-3-small', // 或 text-embedding-3-large
-  remote: {
-    apiKey: process.env.OPENAI_API_KEY,
-    baseUrl: 'https://api.openai.com/v1' // 可选
-  }
+  // API Key 会自动从 catbot.json 获取
+  // 如需覆盖，可以指定:
+  // remote: { apiKey: 'sk-...' }
 }
 ```
 
@@ -337,26 +340,22 @@ interface MemoryChunk {
 
 ## 故障排除
 
-### 1. SQLite 错误
+### SQLite 错误
 ```bash
-# 重新安装原生模块
+# 重新编译原生模块
 pnpm rebuild better-sqlite3
 ```
 
-### 2. Embedding 失败
-```typescript
-// 检查 API key
-console.log(process.env.OPENAI_API_KEY)
+### API Key 问题
+API Key 会自动从 `workspace/catbot.json` 的 `model.apiKey` 字段获取。
+如果未配置，可以：
+1. 在设置页面配置 API Key
+2. 使用 Ollama 本地模型（无需 API Key）
+3. 使用 `provider: 'auto'` 自动回退到 dummy embeddings
 
-// 使用 dummy provider 测试
-{
-  provider: 'auto'  // 无 API key 时会自动回退
-}
-```
-
-### 3. 向量搜索不工作
+### 向量搜索不工作
+确保向量功能已启用：
 ```typescript
-// 确保向量功能已启用
 {
   store: {
     vector: {
@@ -364,10 +363,6 @@ console.log(process.env.OPENAI_API_KEY)
     }
   }
 }
-
-// 检查 embedding 是否生成
-const count = vectorStore.count()
-console.log(`Total chunks: ${count}`)
 ```
 
 ## 示例场景

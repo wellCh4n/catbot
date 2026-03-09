@@ -3,8 +3,8 @@
  * Supports multiple embedding services
  */
 
-import Anthropic from '@anthropic-ai/sdk'
-import type { EmbeddingRequest, EmbeddingResponse, MemorySearchConfig } from './types'
+import type { MemorySearchConfig } from './types'
+import type { SettingsManager } from '../managers/settings-manager'
 
 export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>
@@ -14,6 +14,7 @@ export interface EmbeddingProvider {
 
 /**
  * OpenAI Embedding Provider
+ * Uses API key from chat configuration (catbot.json)
  */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private apiKey: string
@@ -21,8 +22,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private baseUrl?: string
   private dimension: number = 1536 // text-embedding-3-small default
 
-  constructor(config: MemorySearchConfig) {
-    this.apiKey = config.remote?.apiKey || process.env.OPENAI_API_KEY || ''
+  constructor(config: MemorySearchConfig, settingsApiKey?: string) {
+    // Priority: config.remote.apiKey > settingsApiKey > process.env
+    this.apiKey = config.remote?.apiKey || settingsApiKey || process.env.OPENAI_API_KEY || ''
     this.model = config.model || 'text-embedding-3-small'
     this.baseUrl = config.remote?.baseUrl
 
@@ -150,19 +152,25 @@ export class DummyEmbeddingProvider implements EmbeddingProvider {
 
 /**
  * Factory to create embedding provider based on config
+ * @param config - Memory search configuration
+ * @param settingsApiKey - API key from chat settings (catbot.json)
  */
-export function createEmbeddingProvider(config: MemorySearchConfig): EmbeddingProvider {
+export function createEmbeddingProvider(
+  config: MemorySearchConfig,
+  settingsApiKey?: string
+): EmbeddingProvider {
   const provider = config.provider
 
   switch (provider) {
     case 'openai':
-      return new OpenAIEmbeddingProvider(config)
+      return new OpenAIEmbeddingProvider(config, settingsApiKey)
     case 'ollama':
       return new OllamaEmbeddingProvider(config)
     case 'auto':
-      // Try OpenAI first, fallback to dummy
-      if (config.remote?.apiKey || process.env.OPENAI_API_KEY) {
-        return new OpenAIEmbeddingProvider(config)
+      // Try OpenAI first if we have an API key from any source
+      const hasApiKey = config.remote?.apiKey || settingsApiKey || process.env.OPENAI_API_KEY
+      if (hasApiKey) {
+        return new OpenAIEmbeddingProvider(config, settingsApiKey)
       }
       console.warn('[Memory Search] No API key found, using dummy embeddings')
       return new DummyEmbeddingProvider()

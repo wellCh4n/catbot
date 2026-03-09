@@ -10,6 +10,7 @@ import { VectorStore } from './vector-store'
 import { createEmbeddingProvider, type EmbeddingProvider, embedBatch } from './embeddings'
 import { resolveMemorySearchConfig } from './config'
 import { SessionManager } from '../managers/session-manager'
+import { SettingsManager } from '../managers/settings-manager'
 import { WORKSPACE_PATH } from '../configs'
 import type {
   MemorySearchConfig,
@@ -25,19 +26,27 @@ export class MemorySearchEngine {
   private vectorStore: VectorStore
   private embeddingProvider: EmbeddingProvider
   private sessionManager: SessionManager
+  private settingsManager: SettingsManager
   private initialized: boolean = false
   private cache: Map<string, MemorySearchResult[]>
 
-  constructor(sessionId: string = 'main', config?: Partial<MemorySearchConfig>) {
+  constructor(
+    sessionId: string = 'main',
+    config?: Partial<MemorySearchConfig>,
+    settingsManager?: SettingsManager
+  ) {
     this.config = resolveMemorySearchConfig(sessionId, config)
     this.vectorStore = new VectorStore({
       path: this.config.store.path,
       vectorEnabled: this.config.store.vector.enabled,
       extensionPath: this.config.store.vector.extensionPath
     })
-    this.embeddingProvider = createEmbeddingProvider(this.config)
     this.sessionManager = new SessionManager()
+    this.settingsManager = settingsManager || new SettingsManager()
     this.cache = new Map()
+
+    // We'll initialize embeddingProvider in init() after getting API key from settings
+    this.embeddingProvider = null as any
 
     console.log('[MemorySearch] Initialized with config:', {
       provider: this.config.provider,
@@ -54,6 +63,21 @@ export class MemorySearchEngine {
     if (this.initialized) return
 
     console.log('[MemorySearch] Starting initialization...')
+
+    // Get API key from chat settings
+    let settingsApiKey: string | undefined
+    try {
+      const settings = await this.settingsManager.read()
+      settingsApiKey = settings.model?.apiKey
+      if (settingsApiKey) {
+        console.log('[MemorySearch] Using API key from chat settings')
+      }
+    } catch (error) {
+      console.warn('[MemorySearch] Failed to read settings, will use config/env API key:', error)
+    }
+
+    // Create embedding provider with API key from settings
+    this.embeddingProvider = createEmbeddingProvider(this.config, settingsApiKey)
 
     // Sync memory sources if configured
     if (this.config.sync.onSessionStart) {

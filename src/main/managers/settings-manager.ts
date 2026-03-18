@@ -24,6 +24,18 @@ export interface ChannelConfig {
     port?: number
     enabled?: boolean
   }
+  dingtalk: {
+    clientId: string
+    clientSecret: string
+    enabled?: boolean
+    robotCode?: string
+    dmPolicy?: string
+    groupPolicy?: string
+    messageType?: string
+    maxReconnectCycles?: number
+    mediaMaxMb?: number
+    allowFrom?: string[]
+  }
   [key: string]: unknown
 }
 
@@ -51,6 +63,12 @@ const DEFAULT_CONFIG: AppConfig = {
       encryptKey: '',
       verificationToken: '',
       port: 3000,
+      enabled: false
+    },
+    dingtalk: {
+      clientId: '',
+      clientSecret: '',
+      robotCode: '',
       enabled: false
     }
   }

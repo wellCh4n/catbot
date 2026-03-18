@@ -1,11 +1,13 @@
 import { SettingsManager, ChannelConfig } from './settings-manager'
 import { AgentManager } from './agent-manager'
 import { FeishuChannel } from '../channels/feishu-channel'
+import { DingtalkChannel } from '../channels/dingtalk-channel'
 
 export class ChannelManager {
   private settingsManager: SettingsManager
   private agentManager?: AgentManager
   private feishuChannel?: FeishuChannel
+  private dingtalkChannel?: DingtalkChannel
 
   constructor(settingsManager: SettingsManager) {
     this.settingsManager = settingsManager
@@ -36,11 +38,28 @@ export class ChannelManager {
     } else {
       console.log('[ChannelManager] Feishu Channel is disabled')
     }
+
+    // Initialize DingTalk Channel if enabled
+    if (config.channel?.dingtalk?.enabled) {
+      try {
+        console.log('[ChannelManager] Starting DingTalk Channel...')
+        this.dingtalkChannel = new DingtalkChannel(this.agentManager, this.settingsManager)
+        await this.dingtalkChannel.start()
+        console.log('[ChannelManager] DingTalk Channel started successfully')
+      } catch (err) {
+        console.error('[ChannelManager] Failed to start DingTalk Channel:', err)
+      }
+    } else {
+      console.log('[ChannelManager] DingTalk Channel is disabled')
+    }
   }
 
   async stop(): Promise<void> {
     if (this.feishuChannel) {
       await this.feishuChannel.stop()
+    }
+    if (this.dingtalkChannel) {
+      await this.dingtalkChannel.stop()
     }
   }
 
@@ -52,24 +71,24 @@ export class ChannelManager {
   async updateChannelConfig(channelConfig: ChannelConfig): Promise<void> {
     const config = await this.settingsManager.read()
 
-    // Check if Feishu enabled state changed
     const feishuWasEnabled = config.channel?.feishu?.enabled
     const oldFeishuConfig = config.channel?.feishu
     const feishuIsEnabled = channelConfig.feishu?.enabled
+
+    const dingtalkWasEnabled = config.channel?.dingtalk?.enabled
+    const oldDingtalkConfig = config.channel?.dingtalk
+    const dingtalkIsEnabled = channelConfig.dingtalk?.enabled
 
     // Update config first
     config.channel = channelConfig
     await this.settingsManager.update(config)
 
-    // Handle Feishu channel state change
     if (this.agentManager) {
+      // ── Feishu ──────────────────────────────────────────────────────────────
       if (!feishuWasEnabled && feishuIsEnabled) {
         console.log('[ChannelManager] Feishu enabled, starting...')
         try {
-          // Re-create channel to pick up new config
-          if (this.feishuChannel) {
-            await this.feishuChannel.stop()
-          }
+          if (this.feishuChannel) await this.feishuChannel.stop()
           this.feishuChannel = new FeishuChannel(this.agentManager, this.settingsManager)
           await this.feishuChannel.start()
           console.log('[ChannelManager] Feishu Channel started successfully')
@@ -84,22 +103,48 @@ export class ChannelManager {
           console.log('[ChannelManager] Feishu Channel stopped')
         }
       } else if (feishuIsEnabled && feishuWasEnabled) {
-        // Check if config actually changed
-        if (JSON.stringify(oldFeishuConfig) === JSON.stringify(channelConfig.feishu)) {
-          return
-        }
-
-        // If config changed but still enabled, restart to apply new settings
-        console.log('[ChannelManager] Feishu config updated, restarting...')
-        try {
-          if (this.feishuChannel) {
-            await this.feishuChannel.stop()
+        if (JSON.stringify(oldFeishuConfig) !== JSON.stringify(channelConfig.feishu)) {
+          console.log('[ChannelManager] Feishu config updated, restarting...')
+          try {
+            if (this.feishuChannel) await this.feishuChannel.stop()
+            this.feishuChannel = new FeishuChannel(this.agentManager, this.settingsManager)
+            await this.feishuChannel.start()
+            console.log('[ChannelManager] Feishu Channel restarted successfully')
+          } catch (err) {
+            console.error('[ChannelManager] Failed to restart Feishu Channel:', err)
           }
-          this.feishuChannel = new FeishuChannel(this.agentManager, this.settingsManager)
-          await this.feishuChannel.start()
-          console.log('[ChannelManager] Feishu Channel restarted successfully')
+        }
+      }
+
+      // ── DingTalk ─────────────────────────────────────────────────────────────
+      if (!dingtalkWasEnabled && dingtalkIsEnabled) {
+        console.log('[ChannelManager] DingTalk enabled, starting...')
+        try {
+          if (this.dingtalkChannel) await this.dingtalkChannel.stop()
+          this.dingtalkChannel = new DingtalkChannel(this.agentManager, this.settingsManager)
+          await this.dingtalkChannel.start()
+          console.log('[ChannelManager] DingTalk Channel started successfully')
         } catch (err) {
-          console.error('[ChannelManager] Failed to restart Feishu Channel:', err)
+          console.error('[ChannelManager] Failed to start DingTalk Channel:', err)
+        }
+      } else if (dingtalkWasEnabled && !dingtalkIsEnabled) {
+        console.log('[ChannelManager] DingTalk disabled, stopping...')
+        if (this.dingtalkChannel) {
+          await this.dingtalkChannel.stop()
+          this.dingtalkChannel = undefined
+          console.log('[ChannelManager] DingTalk Channel stopped')
+        }
+      } else if (dingtalkIsEnabled && dingtalkWasEnabled) {
+        if (JSON.stringify(oldDingtalkConfig) !== JSON.stringify(channelConfig.dingtalk)) {
+          console.log('[ChannelManager] DingTalk config updated, restarting...')
+          try {
+            if (this.dingtalkChannel) await this.dingtalkChannel.stop()
+            this.dingtalkChannel = new DingtalkChannel(this.agentManager, this.settingsManager)
+            await this.dingtalkChannel.start()
+            console.log('[ChannelManager] DingTalk Channel restarted successfully')
+          } catch (err) {
+            console.error('[ChannelManager] Failed to restart DingTalk Channel:', err)
+          }
         }
       }
     }

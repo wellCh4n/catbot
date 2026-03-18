@@ -11,7 +11,8 @@ export function registerChannelHandlers(channelManager: ChannelManager): void {
   })
 
   ipcMain.handle('channel:update-by-id', async (_, { channelId, config }) => {
-    await channelManager.setChannel(channelId, config)
+    const current = await channelManager.getChannelConfig()
+    await channelManager.updateChannelConfig({ ...current, [channelId]: config })
     return { success: true }
   })
 }

@@ -44,7 +44,6 @@ const DingTalkAccountConfigSchema = z.object({
 
   /** Card template ID for AI interactive cards
    * obtain the template ID from DingTalk Developer Console.
-   * ref: https://github.com/soimy/openclaw-channel-dingtalk/blob/main/README.md#3-%E5%BB%BA%E7%AB%8B%E5%8D%A1%E7%89%87%E6%A8%A1%E6%9D%BF%E5%8F%AF%E9%80%89
    */
   cardTemplateId: z.string().optional(),
 

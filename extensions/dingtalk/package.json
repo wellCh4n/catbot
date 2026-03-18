@@ -1,35 +1,23 @@
 {
-  "name": "@soimy/dingtalk",
+  "name": "dingtalk",
   "version": "3.2.0",
   "description": "DingTalk (钉钉) channel plugin for OpenClaw",
   "keywords": [
     "bot",
     "channel",
-    "clawdbot",
     "dingtalk",
     "openclaw",
     "stream",
     "钉钉"
   ],
-  "homepage": "https://github.com/soimy/openclaw-channel-dingtalk",
   "license": "MIT",
-  "author": "YM Shen <soimy@163.com> (http://github.com/soimy)",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/soimy/openclaw-channel-dingtalk.git"
-  },
   "files": [
     "index.ts",
     "src/*.ts",
-    "openclaw.plugin.json",
-    "clawbot.plugin.json"
+    "openclaw.plugin.json"
   ],
   "type": "module",
   "main": "index.ts",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
   "scripts": {
     "format": "oxfmt --write package.json tsconfig.json index.ts src/*.ts",
     "format:check": "oxfmt --check package.json tsconfig.json index.ts src/*.ts",
@@ -78,11 +66,6 @@
         "dd",
         "ding"
       ]
-    },
-    "install": {
-      "npmSpec": "@soimy/dingtalk",
-      "localPath": ".",
-      "defaultChoice": "npm"
     }
   }
 }

@@ -22,9 +22,16 @@ export function registerAgentHandlers(agentManager: AgentManager): void {
   // IPC Handler for Agent Loop
   ipcMain.handle(
     'agent-loop',
-    async (_, { message, sessionId }: { message: ChatMessage; sessionId?: string }) => {
+    async (
+      _,
+      {
+        message,
+        sessionId,
+        modelName
+      }: { message: ChatMessage; sessionId?: string; modelName?: string }
+    ) => {
       try {
-        return await agentManager.run(sessionId || 'main', message)
+        return await agentManager.run(sessionId || 'main', message, undefined, modelName)
       } catch (error: unknown) {
         console.error('Agent Loop Failed:', error)
         const msg = error instanceof Error ? error.message : String(error)

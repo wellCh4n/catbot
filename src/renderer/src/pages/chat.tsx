@@ -6,7 +6,8 @@ import {
   Trash2,
   Send as SendIcon,
   MessageSquare,
-  BrushCleaning
+  BrushCleaning,
+  ChevronDown
 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { ChatMessage } from '../../../common/types'
@@ -15,6 +16,29 @@ import { UserMessage } from '../components/chat/user-message'
 import { AssistantMessage } from '../components/chat/assistant-message'
 import { ToolMessage } from '../components/chat/tool-message'
 import { ThinkingMessage } from '../components/chat/thinking-message'
+
+const PROVIDER_MODELS: Record<string, { label: string; value: string }[]> = {
+  anthropic: [
+    { label: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
+    { label: 'Claude Opus 4.6', value: 'claude-opus-4-6' },
+    { label: 'Claude Haiku 4.5', value: 'claude-haiku-4-5-20251001' }
+  ],
+  openai: [
+    { label: 'GPT-5.4', value: 'gpt-5.4' },
+    { label: 'GPT-5.3 Codex', value: 'gpt-5.3-codex' }
+  ],
+  google: [
+    { label: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },
+    { label: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' }
+  ],
+  minimax: [
+    { label: 'MiniMax M2.7', value: 'minimax-m2.7' },
+    { label: 'MiniMax M2.5', value: 'minimax-m2.5' }
+  ],
+  ollama: [],
+  custom: []
+}
 
 export default function Chat(): React.JSX.Element {
   const navigate = useNavigate()
@@ -27,6 +51,82 @@ export default function Chat(): React.JSX.Element {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const isHydratingHistoryRef = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [selectedModel, setSelectedModel] = useState('')
+  const [currentProvider, setCurrentProvider] = useState('anthropic')
+  const [isCustomModel, setIsCustomModel] = useState(false)
+  const [customModelInput, setCustomModelInput] = useState('')
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
+
+  const initialLoadDone = useRef(false)
+
+  const loadProviderFromConfig = useCallback(async (): Promise<void> => {
+    try {
+      const content = await window.api.readConfigFile('catbot.json')
+      const parsed = JSON.parse(content)
+      const provider = parsed?.model?.provider || 'anthropic'
+      const isFirstLoad = !initialLoadDone.current
+      initialLoadDone.current = true
+
+      setCurrentProvider((prev) => {
+        if (prev !== provider || isFirstLoad) {
+          // Provider changed or first load — set default model for this provider
+          const presets = PROVIDER_MODELS[provider] || []
+          if (presets.length > 0) {
+            setSelectedModel(presets[0].value)
+            setIsCustomModel(false)
+          }
+        }
+        return provider
+      })
+    } catch {
+      // Ignore
+    }
+  }, [])
+
+  // Load provider from config on mount and when settings change
+  useEffect(() => {
+    loadProviderFromConfig()
+    const handleSettingsUpdate = (): void => {
+      loadProviderFromConfig()
+    }
+    window.addEventListener('settings-updated', handleSettingsUpdate)
+    return () => window.removeEventListener('settings-updated', handleSettingsUpdate)
+  }, [loadProviderFromConfig])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent): void => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setShowModelDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleSelectModel = (value: string): void => {
+    setSelectedModel(value)
+    setIsCustomModel(false)
+    setShowModelDropdown(false)
+  }
+
+  const handleCustomModelSelect = (): void => {
+    setIsCustomModel(true)
+    setShowModelDropdown(false)
+    // Focus the custom input after render
+    requestAnimationFrame(() => {
+      const input = document.getElementById('custom-model-input')
+      input?.focus()
+    })
+  }
+
+  const handleCustomModelConfirm = (): void => {
+    const trimmed = customModelInput.trim()
+    if (trimmed) {
+      setSelectedModel(trimmed)
+    }
+  }
 
   const scrollToBottom = (behavior: ScrollBehavior): void => {
     messagesEndRef.current?.scrollIntoView({ behavior })
@@ -165,6 +265,31 @@ export default function Chat(): React.JSX.Element {
             }
             return prev
           })
+        } else if (data.type === 'stream_delta') {
+          setMessages((prev) => {
+            const lastMsg = prev[prev.length - 1]
+            // If the last message is already a streaming message with the same ID, append delta
+            if (lastMsg && lastMsg.id === data.messageId && lastMsg.role === 'assistant' && !lastMsg.toolUse) {
+              const newMessages = [...prev]
+              newMessages[newMessages.length - 1] = {
+                ...lastMsg,
+                content: lastMsg.content + data.delta
+              }
+              return newMessages
+            }
+            // Otherwise, create a new assistant message for streaming
+            return [
+              ...prev,
+              {
+                id: data.messageId,
+                role: 'assistant' as const,
+                content: data.delta,
+                timestamp: Date.now()
+              }
+            ]
+          })
+        } else if (data.type === 'stream_end') {
+          // Stream finished — no action needed, the message is already in state
         }
       })
       return cleanup
@@ -184,7 +309,7 @@ export default function Chat(): React.JSX.Element {
       const parsed: Record<string, unknown> = JSON.parse(config)
       const model = parsed?.model || {}
 
-      const requiredFields = ['provider', 'apiKey', 'modelName', 'baseUrl']
+      const requiredFields = ['provider', 'apiKey', 'baseUrl']
       const missingFields = requiredFields.filter((field) => !model[field])
 
       if (missingFields.length > 0) {
@@ -221,8 +346,8 @@ export default function Chat(): React.JSX.Element {
     focusInput()
 
     try {
-      // Call agent loop with the new user message
-      await window.api.agentLoop(userMessage, currentSessionId)
+      // Call agent loop with the new user message and selected model
+      await window.api.agentLoop(userMessage, currentSessionId, selectedModel)
     } catch (error: unknown) {
       console.error('Chat error:', error)
       const msg = error instanceof Error ? error.message : String(error)
@@ -389,7 +514,87 @@ export default function Chat(): React.JSX.Element {
                 autoFocus
               />
 
-              <div className="flex justify-end items-center px-2 pb-2">
+              <div className="flex justify-between items-center px-2 pb-2">
+                {/* Model Selector */}
+                <div className="relative" ref={modelDropdownRef}>
+                  {isCustomModel ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        id="custom-model-input"
+                        type="text"
+                        value={customModelInput}
+                        onChange={(e) => setCustomModelInput(e.target.value)}
+                        onBlur={handleCustomModelConfirm}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleCustomModelConfirm()
+                            ;(e.target as HTMLInputElement).blur()
+                          }
+                        }}
+                        placeholder="Enter model name..."
+                        className="text-xs px-2 py-1.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md border-none focus:outline-none focus:ring-1 focus:ring-blue-500/30 w-48"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomModel(false)
+                          setShowModelDropdown(true)
+                        }}
+                        className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 px-1 cursor-pointer"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowModelDropdown(!showModelDropdown)}
+                      className="flex items-center gap-1 text-xs px-2 py-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors cursor-pointer"
+                    >
+                      <span className="max-w-[180px] truncate">
+                        {(PROVIDER_MODELS[currentProvider] || []).find(
+                          (m) => m.value === selectedModel
+                        )?.label ||
+                          selectedModel ||
+                          'Select Model'}
+                      </span>
+                      <ChevronDown size={14} />
+                    </button>
+                  )}
+
+                  {showModelDropdown && (
+                    <div className="absolute bottom-full left-0 mb-1 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                      {(PROVIDER_MODELS[currentProvider] || []).map((model) => (
+                        <button
+                          key={model.value}
+                          type="button"
+                          onClick={() => handleSelectModel(model.value)}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
+                            selectedModel === model.value
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          {model.label}
+                        </button>
+                      ))}
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                      <button
+                        type="button"
+                        onClick={handleCustomModelSelect}
+                        className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
+                          isCustomModel
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                      >
+                        Custom...
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   type="submit"
                   disabled={!inputValue.trim() || isLoading}

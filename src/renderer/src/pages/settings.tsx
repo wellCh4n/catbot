@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react'
-import { Monitor, Cpu, Loader2, Save, Eye, EyeOff } from 'lucide-react'
+import { Monitor, Cpu, Loader2, Save, Eye, EyeOff, Brain } from 'lucide-react'
 import { useTheme } from '../components/theme-context'
 
 interface ModelSettings {
   provider: string
   apiKey: string
-  modelName: string
   baseUrl: string
+  stream?: boolean
+}
+
+interface MemorySettings {
+  enabled: boolean
+  extractionEnabled: boolean
 }
 
 interface SystemSettings {
@@ -16,6 +21,7 @@ interface SystemSettings {
 
 interface AppSettings {
   model: ModelSettings
+  memory: MemorySettings
   system: SystemSettings
 }
 
@@ -23,8 +29,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   model: {
     provider: 'openai',
     apiKey: '',
-    modelName: 'gpt-4o',
     baseUrl: 'https://api.openai.com/v1'
+  },
+  memory: {
+    enabled: true,
+    extractionEnabled: true
   },
   system: {
     theme: 'system',
@@ -34,7 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export default function Settings(): React.JSX.Element {
   const { setTheme } = useTheme()
-  const [activeTab, setActiveTab] = useState<'model' | 'system'>('model')
+  const [activeTab, setActiveTab] = useState<'model' | 'memory' | 'system'>('model')
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -68,9 +77,14 @@ export default function Settings(): React.JSX.Element {
         typeof parsedRecord.system === 'object' && parsedRecord.system !== null
           ? (parsedRecord.system as Record<string, unknown>)
           : {}
+      const parsedMemory =
+        typeof parsedRecord.memory === 'object' && parsedRecord.memory !== null
+          ? (parsedRecord.memory as Record<string, unknown>)
+          : {}
 
       const merged: AppSettings = {
         model: { ...DEFAULT_SETTINGS.model, ...(parsedModel as Partial<ModelSettings>) },
+        memory: { ...DEFAULT_SETTINGS.memory, ...(parsedMemory as Partial<MemorySettings>) },
         system: { ...DEFAULT_SETTINGS.system, ...(parsedSystem as Partial<SystemSettings>) }
       }
       setSettings(merged)
@@ -102,6 +116,7 @@ export default function Settings(): React.JSX.Element {
       const newConfig = {
         ...currentConfig,
         model: settings.model,
+        memory: settings.memory,
         system: settings.system
       }
 
@@ -112,6 +127,8 @@ export default function Settings(): React.JSX.Element {
       ])
       setOriginalSettings(JSON.stringify(settings))
       setHasChanges(false)
+      // Notify other pages (e.g. chat) that settings have changed
+      window.dispatchEvent(new CustomEvent('settings-updated'))
     } catch (error) {
       console.error('Failed to save settings:', error)
     } finally {
@@ -171,6 +188,17 @@ export default function Settings(): React.JSX.Element {
             Model Settings
           </button>
           <button
+            onClick={() => setActiveTab('memory')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+              activeTab === 'memory'
+                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+          >
+            <Brain size={18} />
+            Memory
+          </button>
+          <button
             onClick={() => setActiveTab('system')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
               activeTab === 'system'
@@ -201,11 +229,15 @@ export default function Settings(): React.JSX.Element {
                       </label>
                       <select
                         value={settings.model.provider}
-                        onChange={(e) => updateModelSetting('provider', e.target.value)}
+                        onChange={(e) => {
+                          updateModelSetting('provider', e.target.value)
+                        }}
                         className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-transparent transition-all text-gray-900 dark:text-white"
                       >
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
+                        <option value="google">Google Gemini</option>
+                        <option value="minimax">Minimax</option>
                         <option value="ollama">Ollama</option>
                         <option value="custom">Custom</option>
                       </select>
@@ -235,19 +267,6 @@ export default function Settings(): React.JSX.Element {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Model Name
-                      </label>
-                      <input
-                        type="text"
-                        value={settings.model.modelName}
-                        onChange={(e) => updateModelSetting('modelName', e.target.value)}
-                        placeholder="gpt-4o"
-                        className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-transparent transition-all text-gray-900 dark:text-white placeholder-gray-400"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Base URL
                       </label>
                       <input
@@ -258,6 +277,124 @@ export default function Settings(): React.JSX.Element {
                         className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-transparent transition-all text-gray-900 dark:text-white placeholder-gray-400"
                       />
                     </div>
+
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Streaming Output
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Enable streaming to see responses in real-time
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.model.stream ?? false}
+                        onClick={() =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            model: { ...prev.model, stream: !prev.model.stream }
+                          }))
+                        }
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                          settings.model.stream
+                            ? 'bg-blue-600'
+                            : 'bg-gray-200 dark:bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            settings.model.stream ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : activeTab === 'memory' ? (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                    Memory System
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                    Persistent memory across conversations. Uses the current chat model for
+                    relevance ranking and background extraction.
+                  </p>
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Enable Memory
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Remember information across conversations
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.memory.enabled}
+                        onClick={() =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            memory: { ...prev.memory, enabled: !prev.memory.enabled }
+                          }))
+                        }
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                          settings.memory.enabled
+                            ? 'bg-blue-600'
+                            : 'bg-gray-200 dark:bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            settings.memory.enabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Background Extraction
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Auto-extract memories from conversations after each response
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.memory.extractionEnabled}
+                        onClick={() =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            memory: {
+                              ...prev.memory,
+                              extractionEnabled: !prev.memory.extractionEnabled
+                            }
+                          }))
+                        }
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                          settings.memory.extractionEnabled
+                            ? 'bg-blue-600'
+                            : 'bg-gray-200 dark:bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            settings.memory.extractionEnabled
+                              ? 'translate-x-5'
+                              : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
                   </div>
                 </div>
               </div>

@@ -1,16 +1,21 @@
 /**
- * Memory Search Module
- * Export all public APIs
+ * Memory Module — Public API
  */
 
-export * from './types'
-export * from './config'
-export * from './embeddings'
-export * from './vector-store'
-export * from './memory-search'
-
-// Re-export main classes for convenience
 export { MemorySearchEngine } from './memory-search'
+export { MemoryFileManager } from './memory-file-manager'
+export { RelevanceRanker } from './relevance-ranker'
+export { MemoryExtractionAgent } from './extraction-agent'
 export { VectorStore } from './vector-store'
-export { createEmbeddingProvider, type EmbeddingProvider } from './embeddings'
-export { resolveMemorySearchConfig, getDefaultConfig } from './config'
+
+export type {
+  MemoryType,
+  MemoryEntry,
+  MemoryFrontmatter,
+  RankedMemory,
+  ExtractionResult,
+  MemorySearchOptions
+} from './memory-types'
+
+export type { MemoryConfig } from './types'
+export { DEFAULT_MEMORY_CONFIG } from './types'

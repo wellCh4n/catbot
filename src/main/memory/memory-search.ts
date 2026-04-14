@@ -1,504 +1,166 @@
 /**
- * Memory Search Engine
- * Main interface for searching conversation history and memory files
+ * MemorySearchEngine — Claude Code-inspired architecture.
+ *
+ * Two-level memory:
+ *   1. MEMORY.md index   (always injected into system prompt)
+ *   2. Topic files       (searched per query via FTS5 pre-filter + Haiku ranking)
+ *
+ * No OpenAI embeddings required — uses the same Anthropic client as the main chat.
  */
 
-import { readFile, readdir } from 'fs/promises'
-import { join, extname, dirname } from 'path'
-import { randomUUID } from 'crypto'
-import { mkdir } from 'fs/promises'
-import { VectorStore } from './vector-store'
-import { createEmbeddingProvider, type EmbeddingProvider, embedBatch } from './embeddings'
-import { resolveMemorySearchConfig } from './config'
-import { SessionManager } from '../managers/session-manager'
-import { SettingsManager } from '../managers/settings-manager'
+import { join } from 'path'
 import { WORKSPACE_PATH } from '../configs'
-import type {
-  MemorySearchConfig,
-  MemoryChunk,
-  MemorySearchOptions,
-  MemorySearchResult
-} from './types'
-import type { ChatMessage } from '../../common/types'
+import type Anthropic from '@anthropic-ai/sdk'
+import { VectorStore } from './vector-store'
+import { MemoryFileManager } from './memory-file-manager'
+import { RelevanceRanker } from './relevance-ranker'
+import type { MemoryEntry, MemorySearchOptions, RankedMemory } from './memory-types'
+import type { MemoryChunk } from './legacy-types'
+
+const DEFAULT_MAX_RESULTS = 3
+const DEFAULT_CANDIDATE_MULTIPLIER = 4 // FTS fetches this many before ranking
 
 export class MemorySearchEngine {
-  private config: MemorySearchConfig
-  private vectorStore?: VectorStore
-  private embeddingProvider?: EmbeddingProvider
-  private sessionManager: SessionManager
-  private settingsManager: SettingsManager
-  private initialized: boolean = false
-  private cache: Map<string, MemorySearchResult[]>
+  private fileManager: MemoryFileManager
+  private vectorStore: VectorStore
+  private ranker: RelevanceRanker | null = null
+  private initialized = false
 
-  constructor(
-    sessionId: string = 'main',
-    config?: Partial<MemorySearchConfig>,
-    settingsManager?: SettingsManager
-  ) {
-    this.config = resolveMemorySearchConfig(sessionId, config)
-    this.sessionManager = new SessionManager()
-    this.settingsManager = settingsManager || new SettingsManager()
-    this.cache = new Map()
+  private readonly storePath: string
 
-    console.log('[MemorySearch] Initialized with config:', {
-      provider: this.config.provider,
-      model: this.config.model,
-      storePath: this.config.store.path,
-      vectorEnabled: this.config.store.vector.enabled
-    })
+  constructor(baseDir?: string) {
+    const memoryDir = baseDir ?? join(WORKSPACE_PATH, 'memory')
+    this.fileManager = new MemoryFileManager(memoryDir)
+    this.storePath = join(memoryDir, 'search.sqlite')
+    this.vectorStore = new VectorStore({ path: this.storePath, vectorEnabled: false })
   }
 
   /**
-   * Initialize and sync data sources
+   * Initialize the engine. Pass the Anthropic client to enable small-model ranking.
+   * Without a client the engine falls back to FTS5 ordering.
    */
-  async init(): Promise<void> {
+  async init(client?: Anthropic, rankingModel?: string): Promise<void> {
     if (this.initialized) return
 
-    console.log('[MemorySearch] Starting initialization...')
+    await this.fileManager.init()
 
-    // Ensure memory directory exists
-    const memoryDir = dirname(this.config.store.path)
-    try {
-      await mkdir(memoryDir, { recursive: true })
-      console.log(`[MemorySearch] Ensured directory exists: ${memoryDir}`)
-    } catch (error) {
-      console.error(`[MemorySearch] Failed to create directory: ${memoryDir}`, error)
-      throw error
+    if (client) {
+      this.ranker = new RelevanceRanker(client, rankingModel)
     }
 
-    // Create VectorStore (will create SQLite database)
-    this.vectorStore = new VectorStore({
-      path: this.config.store.path,
-      vectorEnabled: this.config.store.vector.enabled,
-      extensionPath: this.config.store.vector.extensionPath
-    })
-    console.log(`[MemorySearch] Vector store created at: ${this.config.store.path}`)
-
-    // Get API key from chat settings
-    let settingsApiKey: string | undefined
-    try {
-      const settings = await this.settingsManager.read()
-      settingsApiKey = settings.model?.apiKey
-      if (settingsApiKey) {
-        console.log('[MemorySearch] Using API key from chat settings')
-      }
-    } catch (error) {
-      console.warn('[MemorySearch] Failed to read settings, will use config/env API key:', error)
-    }
-
-    // Create embedding provider with API key from settings
-    this.embeddingProvider = createEmbeddingProvider(this.config, settingsApiKey)
-
-    // Sync memory sources if configured
-    if (this.config.sync.onSessionStart) {
-      await this.syncAll()
-    }
+    // Index all topic files into FTS5 for pre-filtering
+    await this.syncTopicsToFTS()
 
     this.initialized = true
-    console.log('[MemorySearch] Initialization complete')
+    console.log(
+      `[MemorySearch] Initialized. Ranker: ${this.ranker ? 'Haiku' : 'FTS5-only'}`
+    )
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Get the always-included MEMORY.md index content.
+   * Injected into every system prompt regardless of query.
+   */
+  async getMemoryIndex(): Promise<string> {
+    return this.fileManager.readIndex()
   }
 
   /**
-   * Search across configured memory sources
+   * Search for relevant memories for a specific user query.
+   * Returns ranked results with staleness info.
    */
-  async search(options: MemorySearchOptions): Promise<MemorySearchResult[]> {
-    if (!this.initialized || !this.vectorStore || !this.embeddingProvider) {
-      await this.init()
+  async search(options: MemorySearchOptions): Promise<RankedMemory[]> {
+    if (!this.initialized) await this.init()
+
+    const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS
+    const candidateLimit = maxResults * DEFAULT_CANDIDATE_MULTIPLIER
+
+    // Step 1: FTS5 pre-filter — get candidate chunks
+    const ftsCandidates = this.vectorStore.searchText(
+      options.query,
+      candidateLimit,
+      ['memory']
+    )
+
+    if (ftsCandidates.length === 0) {
+      // FTS found nothing — load all topic files and let the ranker decide
+      const allEntries = await this.fileManager.listTopicFiles()
+      if (allEntries.length === 0) return []
+      return this.rankEntries(options.query, allEntries, maxResults)
     }
 
-    // Now these are guaranteed to be defined
-    const vectorStore = this.vectorStore!
-    const embeddingProvider = this.embeddingProvider!
+    // Step 2: Map chunk sources back to MemoryEntry objects
+    const sourceSet = new Set(ftsCandidates.map((c) => c.metadata.source))
+    const allEntries = await this.fileManager.listTopicFiles()
+    const candidates = allEntries.filter((e) => sourceSet.has(e.filePath))
 
-    const {
-      query,
-      maxResults = this.config.query.maxResults,
-      minScore = this.config.query.minScore,
-      sources = this.config.sources,
-      sessionId
-    } = options
-
-    // Check cache
-    const cacheKey = JSON.stringify({ query, maxResults, minScore, sources, sessionId })
-    if (this.config.cache.enabled && this.cache.has(cacheKey)) {
-      console.log('[MemorySearch] Cache hit')
-      return this.cache.get(cacheKey)!
+    if (candidates.length === 0) {
+      // FTS chunks reference files that no longer exist — fallback to all
+      return this.rankEntries(options.query, allEntries, maxResults)
     }
 
-    console.log('[MemorySearch] Searching:', { query, maxResults, sources })
-
-    // Sync on search if configured
-    if (this.config.sync.onSearch) {
-      await this.syncAll()
-    }
-
-    // Generate query embedding
-    const [queryEmbedding] = await embeddingProvider.embed([query])
-
-    // Perform hybrid search
-    const results = this.config.query.hybrid.enabled && this.config.store.vector.enabled
-      ? vectorStore.searchHybrid(query, queryEmbedding, {
-          limit: maxResults * 2, // Get more for filtering
-          vectorWeight: this.config.query.hybrid.vectorWeight,
-          textWeight: this.config.query.hybrid.textWeight,
-          sourceTypes: sources
-        })
-      : // Fallback to text search only
-        vectorStore.searchText(query, maxResults * 2, sources).map((chunk) => ({
-          chunk,
-          score: 0.5 // Default score for text-only search
-        }))
-
-    // Apply temporal decay if enabled
-    let finalResults = results
-    if (this.config.query.hybrid.temporalDecay.enabled) {
-      finalResults = this.applyTemporalDecay(results)
-    }
-
-    // Apply MMR if enabled
-    if (this.config.query.hybrid.mmr.enabled && this.config.store.vector.enabled) {
-      finalResults = this.applyMMR(finalResults)
-    }
-
-    // Filter by minimum score and limit
-    const filtered = finalResults
-      .filter((r) => r.score >= minScore)
-      .slice(0, maxResults)
-      .map((r) => ({
-        chunk: r.chunk,
-        score: r.score,
-        relevance: r.score
-      }))
-
-    // Cache results
-    if (this.config.cache.enabled) {
-      this.cache.set(cacheKey, filtered)
-
-      // Enforce cache size limit
-      if (this.config.cache.maxEntries && this.cache.size > this.config.cache.maxEntries) {
-        const firstKey = this.cache.keys().next().value
-        if (firstKey) {
-          this.cache.delete(firstKey)
-        }
-      }
-    }
-
-    console.log(`[MemorySearch] Found ${filtered.length} results`)
-    return filtered
+    return this.rankEntries(options.query, candidates, maxResults)
   }
 
   /**
-   * Sync all configured data sources
+   * Get the MemoryFileManager for direct file operations (used by ExtractionAgent).
    */
-  async syncAll(): Promise<void> {
-    console.log('[MemorySearch] Syncing data sources...')
-
-    for (const source of this.config.sources) {
-      try {
-        if (source === 'memory') {
-          await this.syncMemoryFiles()
-        } else if (source === 'sessions') {
-          await this.syncSessions()
-        }
-      } catch (error) {
-        console.error(`[MemorySearch] Failed to sync ${source}:`, error)
-      }
-    }
-
-    console.log('[MemorySearch] Sync complete')
+  getFileManager(): MemoryFileManager {
+    return this.fileManager
   }
 
   /**
-   * Sync memory files (markdown, text files)
+   * Re-sync topic files into FTS5 index (call after writing new memories).
    */
-  private async syncMemoryFiles(): Promise<void> {
-    const memoryDir = join(WORKSPACE_PATH, 'memory')
-    const paths = [memoryDir, ...this.config.extraPaths]
-
-    for (const path of paths) {
-      try {
-        const files = await this.getTextFiles(path)
-        console.log(`[MemorySearch] Found ${files.length} files in ${path}`)
-
-        for (const file of files) {
-          await this.indexFile(file)
-        }
-      } catch (error) {
-        console.warn(`[MemorySearch] Cannot access ${path}:`, error)
-      }
-    }
+  async sync(): Promise<void> {
+    await this.syncTopicsToFTS()
   }
 
-  /**
-   * Sync session conversation history
-   */
-  private async syncSessions(): Promise<void> {
-    const sessions = await this.sessionManager.listSessions()
-    console.log(`[MemorySearch] Syncing ${sessions.length} sessions`)
-
-    for (const sessionId of sessions) {
-      try {
-        const messages = await this.sessionManager.read(sessionId)
-        await this.indexMessages(messages, sessionId)
-      } catch (error) {
-        console.error(`[MemorySearch] Failed to sync session ${sessionId}:`, error)
-      }
-    }
+  close(): void {
+    this.vectorStore.close()
   }
 
-  /**
-   * Index a single file
-   */
-  private async indexFile(filePath: string): Promise<void> {
-    if (!this.vectorStore || !this.embeddingProvider) {
-      console.warn('[MemorySearch] Not initialized, skipping indexFile')
-      return
+  // ── Internal ────────────────────────────────────────────────────────────────
+
+  private async rankEntries(
+    query: string,
+    entries: MemoryEntry[],
+    maxResults: number
+  ): Promise<RankedMemory[]> {
+    if (this.ranker) {
+      return this.ranker.rank(query, entries, maxResults)
     }
-
-    try {
-      const content = await readFile(filePath, 'utf-8')
-      const chunks = this.chunkText(content)
-
-      const chunksWithEmbeddings: MemoryChunk[] = []
-
-      // Generate embeddings
-      if (this.config.store.vector.enabled) {
-        const texts = chunks.map((c) => c.content)
-        const embeddings = await embedBatch(this.embeddingProvider, texts, 100)
-
-        for (let i = 0; i < chunks.length; i++) {
-          chunksWithEmbeddings.push({
-            ...chunks[i],
-            embedding: embeddings[i]
-          })
-        }
-      } else {
-        chunksWithEmbeddings.push(...chunks)
-      }
-
-      // Insert into vector store
-      this.vectorStore.insertBatch(chunksWithEmbeddings)
-
-      console.log(`[MemorySearch] Indexed ${filePath}: ${chunks.length} chunks`)
-    } catch (error) {
-      console.error(`[MemorySearch] Failed to index ${filePath}:`, error)
-    }
+    // No ranker — return FTS order
+    return entries.slice(0, maxResults).map((entry, i) => ({
+      entry,
+      score: 1 - i / entries.length,
+      reason: 'fts order'
+    }))
   }
 
-  /**
-   * Index conversation messages
-   */
-  private async indexMessages(messages: ChatMessage[], sessionId: string): Promise<void> {
-    if (!this.vectorStore || !this.embeddingProvider) {
-      console.warn('[MemorySearch] Not initialized, skipping indexMessages')
-      return
-    }
+  /** Index all topic files into SQLite FTS5 for fast pre-filtering. */
+  private async syncTopicsToFTS(): Promise<void> {
+    const entries = await this.fileManager.listTopicFiles()
 
-    const chunks: MemoryChunk[] = []
+    // Clear existing memory chunks and re-index
+    this.vectorStore.deleteBySource('memory')
 
-    for (const message of messages) {
-      const chunk: MemoryChunk = {
-        id: randomUUID(),
-        content: message.content,
-        metadata: {
-          source: `session:${sessionId}`,
-          sourceType: 'sessions',
-          timestamp: message.timestamp,
-          sessionId,
-          messageId: message.id,
-          role: message.role
-        }
+    const chunks: MemoryChunk[] = entries.map((e) => ({
+      id: e.filename,
+      content: `${e.frontmatter.title}\n\n${e.content}`,
+      metadata: {
+        source: e.filePath,
+        sourceType: 'memory' as const,
+        timestamp: new Date(e.frontmatter.updatedAt).getTime()
       }
-      chunks.push(chunk)
-    }
+    }))
 
-    // Generate embeddings
-    if (this.config.store.vector.enabled && chunks.length > 0) {
-      const texts = chunks.map((c) => c.content)
-      const embeddings = await embedBatch(this.embeddingProvider, texts, 100)
-
-      for (let i = 0; i < chunks.length; i++) {
-        chunks[i].embedding = embeddings[i]
-      }
-    }
-
-    // Insert into vector store
     if (chunks.length > 0) {
       this.vectorStore.insertBatch(chunks)
-      console.log(`[MemorySearch] Indexed session ${sessionId}: ${chunks.length} messages`)
-    }
-  }
-
-  /**
-   * Split text into chunks based on token limits
-   */
-  private chunkText(text: string): MemoryChunk[] {
-    const chunks: MemoryChunk[] = []
-    const lines = text.split('\n')
-    let currentChunk = ''
-    const maxChars = this.config.chunking.tokens * 4 // Rough estimation: 1 token ≈ 4 chars
-
-    for (const line of lines) {
-      if (currentChunk.length + line.length > maxChars && currentChunk.length > 0) {
-        chunks.push({
-          id: randomUUID(),
-          content: currentChunk.trim(),
-          metadata: {
-            source: 'memory',
-            sourceType: 'memory',
-            timestamp: Date.now()
-          }
-        })
-        // Apply overlap
-        const overlapChars = Math.floor(maxChars * (this.config.chunking.overlap / this.config.chunking.tokens))
-        currentChunk = currentChunk.slice(-overlapChars) + '\n' + line
-      } else {
-        currentChunk += (currentChunk ? '\n' : '') + line
-      }
     }
 
-    if (currentChunk.trim()) {
-      chunks.push({
-        id: randomUUID(),
-        content: currentChunk.trim(),
-        metadata: {
-          source: 'memory',
-          sourceType: 'memory',
-          timestamp: Date.now()
-        }
-      })
-    }
-
-    return chunks
+    console.log(`[MemorySearch] FTS indexed ${chunks.length} topic file(s)`)
   }
-
-  /**
-   * Get all text files recursively
-   */
-  private async getTextFiles(dirPath: string): Promise<string[]> {
-    const files: string[] = []
-    const textExtensions = ['.md', '.txt', '.text', '.markdown']
-
-    try {
-      const entries = await readdir(dirPath, { withFileTypes: true })
-
-      for (const entry of entries) {
-        const fullPath = join(dirPath, entry.name)
-
-        if (entry.isDirectory()) {
-          const subFiles = await this.getTextFiles(fullPath)
-          files.push(...subFiles)
-        } else if (entry.isFile() && textExtensions.includes(extname(entry.name).toLowerCase())) {
-          files.push(fullPath)
-        }
-      }
-    } catch (error) {
-      // Ignore errors (directory might not exist)
-    }
-
-    return files
-  }
-
-  /**
-   * Apply temporal decay to search results
-   */
-  private applyTemporalDecay(
-    results: Array<{ chunk: MemoryChunk; score: number }>
-  ): Array<{ chunk: MemoryChunk; score: number }> {
-    const now = Date.now()
-    const halfLifeMs = this.config.query.hybrid.temporalDecay.halfLifeDays * 24 * 60 * 60 * 1000
-
-    return results.map((result) => {
-      const age = now - result.chunk.metadata.timestamp
-      const decay = Math.pow(0.5, age / halfLifeMs)
-      return {
-        ...result,
-        score: result.score * decay
-      }
-    })
-  }
-
-  /**
-   * Apply Maximal Marginal Relevance (MMR) for diversity
-   */
-  private applyMMR(
-    results: Array<{ chunk: MemoryChunk; score: number }>
-  ): Array<{ chunk: MemoryChunk; score: number }> {
-    if (results.length === 0) return results
-
-    const lambda = this.config.query.hybrid.mmr.lambda
-    const selected: Array<{ chunk: MemoryChunk; score: number }> = []
-    const remaining = [...results]
-
-    // Select first result
-    selected.push(remaining.shift()!)
-
-    // Iteratively select most relevant and diverse results
-    while (remaining.length > 0 && selected.length < this.config.query.maxResults) {
-      let maxScore = -Infinity
-      let maxIndex = 0
-
-      for (let i = 0; i < remaining.length; i++) {
-        const candidate = remaining[i]
-        if (!candidate.chunk.embedding) continue
-
-        // Calculate relevance to query
-        const relevance = candidate.score
-
-        // Calculate max similarity to already selected
-        let maxSimilarity = 0
-        for (const sel of selected) {
-          if (!sel.chunk.embedding) continue
-          const sim = cosineSimilarity(candidate.chunk.embedding, sel.chunk.embedding)
-          maxSimilarity = Math.max(maxSimilarity, sim)
-        }
-
-        // MMR score: λ * relevance - (1-λ) * maxSimilarity
-        const mmrScore = lambda * relevance - (1 - lambda) * maxSimilarity
-
-        if (mmrScore > maxScore) {
-          maxScore = mmrScore
-          maxIndex = i
-        }
-      }
-
-      selected.push(remaining.splice(maxIndex, 1)[0])
-    }
-
-    return selected
-  }
-
-  /**
-   * Clear cache
-   */
-  clearCache(): void {
-    this.cache.clear()
-  }
-
-  /**
-   * Close and cleanup
-   */
-  close(): void {
-    if (this.vectorStore) {
-      this.vectorStore.close()
-    }
-    this.cache.clear()
-  }
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0
-
-  let dotProduct = 0
-  let normA = 0
-  let normB = 0
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-
-  const magnitude = Math.sqrt(normA) * Math.sqrt(normB)
-  return magnitude === 0 ? 0 : dotProduct / magnitude
 }

@@ -18,8 +18,9 @@ import { SettingsManager } from './settings-manager'
 import { SessionManager } from './session-manager'
 import { SkillsManager } from './skills-manager'
 import { MemorySearchEngine } from '../memory'
+import { MemoryExtractionAgent } from '../memory/extraction-agent'
 import { ChatMessage, AgentUpdate } from '../../common/types'
-import { SYSTEM_PROMPT } from '../prompts/prompt'
+import { SYSTEM_PROMPT, MEMORY_PROMPT } from '../prompts/prompt'
 import { WORKSPACE_PATH } from '../configs'
 
 const execAsync = promisify(exec)
@@ -90,12 +91,15 @@ interface AgentLoopOptions {
   system: string
   maxTokens?: number
   maxSteps?: number
+  stream?: boolean
   onToolUse?: (
     toolName: string,
     input: Record<string, unknown>,
     toolUseId: string
   ) => void | Promise<void>
   onToolResult?: (toolName: string, output: string) => void | Promise<void>
+  onStreamDelta?: (messageId: string, delta: string) => void
+  onStreamEnd?: (messageId: string) => void
 }
 
 export class AgentManager extends EventEmitter {
@@ -104,6 +108,7 @@ export class AgentManager extends EventEmitter {
   private sessionManager: SessionManager
   private skillsManager: SkillsManager
   private memorySearch?: MemorySearchEngine
+  private extractionAgent?: MemoryExtractionAgent
 
   constructor(options: AgentManagerOptions) {
     super()
@@ -116,15 +121,18 @@ export class AgentManager extends EventEmitter {
   async run(
     sessionId: string,
     message: ChatMessage,
-    onUpdate?: (update: AgentUpdate) => void
+    onUpdate?: (update: AgentUpdate) => void,
+    overrideModelName?: string
   ): Promise<string> {
     const startedAt = Date.now()
     try {
-      console.log(`[agent-manager] start message=${message.id} session=${sessionId}`)
+      console.log(`[agent-manager] start message=${message.id} session=${sessionId} overrideModel=${overrideModelName || '(none)'}`)
 
       // 1. Read Config
       const config = await this.settingsManager.read()
-      const { provider, apiKey, baseUrl, modelName } = config.model
+      const { provider, apiKey, baseUrl } = config.model
+      // Prefer the model passed directly from the chat UI over the config file
+      const modelName = overrideModelName || config.model.modelName
 
       if (!apiKey) {
         throw new Error('API Key is missing in Settings')
@@ -162,95 +170,55 @@ export class AgentManager extends EventEmitter {
       let currentToolMsgId: string | undefined
       let currentToolUseId: string | undefined
 
-      // Initialize Memory Search
+      // Initialize Memory Search (once per agent manager lifetime)
       if (!this.memorySearch) {
         try {
-          this.memorySearch = new MemorySearchEngine(
-            sessionId,
-            {
-              enabled: true,
-              provider: 'auto', // Auto: uses OpenAI if API key available, else dummy
-              model: 'text-embedding-3-small',
-              sources: ['memory', 'sessions'],
-              query: {
-                maxResults: 3,
-                minScore: 0.4,
-                hybrid: {
-                  enabled: true,
-                  vectorWeight: 0.7,
-                  textWeight: 0.3,
-                  candidateMultiplier: 4,
-                  mmr: {
-                    enabled: true,
-                    lambda: 0.7
-                  },
-                  temporalDecay: {
-                    enabled: true,
-                    halfLifeDays: 30
-                  }
-                }
-              },
-              sync: {
-                onSessionStart: true,
-                onSearch: false, // Disable sync on every search for performance
-                watch: false,
-                watchDebounceMs: 1500,
-                intervalMinutes: 0,
-                sessions: {
-                  deltaBytes: 100_000,
-                  deltaMessages: 50
-                }
-              }
-            },
-            this.settingsManager
-          )
-          await this.memorySearch.init()
-          console.log('[agent-manager] Memory search initialized')
+          const memCfg = config.memory
+          if (memCfg?.enabled !== false) {
+            // Use the same model as the main chat for ranking & extraction
+            const memModel = modelName || 'claude-sonnet-4-6'
+            this.memorySearch = new MemorySearchEngine()
+            await this.memorySearch.init(client, memModel)
+            this.extractionAgent = new MemoryExtractionAgent(
+              client,
+              this.memorySearch.getFileManager(),
+              memModel
+            )
+            console.log('[agent-manager] Memory search initialized')
+          }
         } catch (error) {
           console.error('[agent-manager] Failed to initialize memory search:', error)
-          // Continue without memory search
         }
       }
 
-      // Search for relevant context from memory
+      // Build memory context (always-included index + per-query ranked results)
       let memoryContext = ''
-      if (this.memorySearch && message.role === 'user') {
+      if (this.memorySearch) {
         try {
-          const memoryResults = await this.memorySearch.search({
-            query: message.content,
-            maxResults: 3,
-            minScore: 0.4,
-            sessionId
-          })
+          const memoryIndex = await this.memorySearch.getMemoryIndex()
 
-          if (memoryResults.length > 0) {
-            console.log(`[agent-manager] Found ${memoryResults.length} relevant memories`)
+          if (memoryIndex.trim()) {
+            memoryContext = `# Memory\n\n${memoryIndex}`
+          }
 
-            memoryContext = '\n\n# Relevant Context from Memory\n\n'
-            memoryContext +=
-              'You have access to the following relevant information from memory and previous conversations:\n\n'
-
-            memoryResults.forEach((result, idx) => {
-              const source =
-                result.chunk.metadata.sourceType === 'sessions'
-                  ? 'Previous Conversation'
-                  : `Memory: ${result.chunk.metadata.source}`
-
-              const timestamp = new Date(result.chunk.metadata.timestamp).toLocaleDateString()
-
-              memoryContext += `## Context ${idx + 1} (Relevance: ${(result.score * 100).toFixed(1)}%)\n`
-              memoryContext += `Source: ${source}\n`
-              memoryContext += `Date: ${timestamp}\n\n`
-              memoryContext += `${result.chunk.content}\n\n`
-              memoryContext += '---\n\n'
+          if (message.role === 'user') {
+            const ranked = await this.memorySearch.search({
+              query: message.content,
+              maxResults: 3
             })
 
-            memoryContext +=
-              'Use this context to provide more informed and contextual responses. Reference it naturally when relevant.\n'
+            if (ranked.length > 0) {
+              console.log(`[agent-manager] Found ${ranked.length} relevant memory item(s)`)
+              memoryContext += '\n\n## Relevant Memories for This Query\n\n'
+              ranked.forEach((r, idx) => {
+                const staleTag = r.entry.isStale ? ' ⚠️ possibly outdated — verify before citing' : ''
+                memoryContext += `### ${idx + 1}. ${r.entry.frontmatter.title} (${r.entry.frontmatter.type}, ${r.entry.ageLabel}${staleTag})\n\n`
+                memoryContext += r.entry.content.trim() + '\n\n'
+              })
+            }
           }
         } catch (error) {
-          console.error('[agent-manager] Memory search failed:', error)
-          // Continue without memory context
+          console.error('[agent-manager] Memory context failed:', error)
         }
       }
 
@@ -260,6 +228,7 @@ export class AgentManager extends EventEmitter {
       const skillsContext = [skillsSummary, alwaysSkillsContent].filter(Boolean).join('\n\n')
       const system = [
         SYSTEM_PROMPT,
+        MEMORY_PROMPT,
         identityPrompt,
         agentsPrompt,
         `# Skills
@@ -284,6 +253,17 @@ ${skillsContext}`,
         model: modelName || 'claude-3-opus-20240229',
         system,
         maxSteps: 50, // reasonable default
+        stream: config.model.stream ?? false,
+        onStreamDelta: (messageId, delta) => {
+          const update: AgentUpdate = { type: 'stream_delta', messageId, delta }
+          if (onUpdate) onUpdate(update)
+          this.emit('update', { update, sessionId })
+        },
+        onStreamEnd: (messageId) => {
+          const update: AgentUpdate = { type: 'stream_end', messageId }
+          if (onUpdate) onUpdate(update)
+          this.emit('update', { update, sessionId })
+        },
         onToolUse: async (toolName, input, toolUseId) => {
           try {
             const inputKeys = input && typeof input === 'object' ? Object.keys(input) : []
@@ -362,6 +342,7 @@ ${skillsContext}`,
 
       // Return the last message content
       const lastMessage = finalMessages[finalMessages.length - 1]
+      const isStreaming = config.model.stream ?? false
       if (lastMessage.role === 'assistant') {
         let responseText = ''
         if (typeof lastMessage.content === 'string') {
@@ -382,10 +363,31 @@ ${skillsContext}`,
             timestamp: Date.now()
           }
           await this.sessionManager.append(msg, sessionId)
-          this.emit('message', { message: msg, sessionId })
+          // Only emit message event for non-streaming mode;
+          // streaming mode already sent content via stream_delta events
+          if (!isStreaming) {
+            this.emit('message', { message: msg, sessionId })
+          }
           console.log(
             `[agent-manager] done duration_ms=${Date.now() - startedAt} response_chars=${responseText.length}`
           )
+
+          // Background memory extraction — fire-and-forget, never blocks response
+          const extractionEnabled = config.memory?.extractionEnabled !== false
+          if (this.extractionAgent && extractionEnabled) {
+            const recentMessages = await this.sessionManager.read(sessionId)
+            this.extractionAgent
+              .extract(recentMessages)
+              .then(async (result) => {
+                if (result.memories.length > 0) {
+                  await this.extractionAgent!.save(result)
+                  // Re-sync FTS after writing new memories
+                  await this.memorySearch?.sync()
+                }
+              })
+              .catch((err) => console.warn('[agent-manager] Background extraction failed:', err))
+          }
+
           return responseText
         }
       }
@@ -504,14 +506,141 @@ ${skillsContext}`,
     this.validateMessageSequence(messages)
 
     for (let step = 0; step < maxSteps; step++) {
-      console.log(`[agentLoop] step=${step + 1}/${maxSteps} messages=${messages.length}`)
-      const response = await opts.client.messages.create({
-        model: opts.model,
-        system: opts.system,
-        messages,
-        tools: TOOLS,
-        max_tokens: maxTokens
-      })
+      console.log(`[agentLoop] step=${step + 1}/${maxSteps} messages=${messages.length} model=${opts.model} stream=${opts.stream}`)
+
+      let response: Anthropic.Messages.Message
+
+      if (opts.stream) {
+        // Streaming mode: use create() with stream: true for better proxy compatibility
+        const MAX_STREAM_RETRIES = 3
+        let streamRetry = 0
+        while (true) {
+          const streamMsgId = randomUUID()
+          try {
+            const stream = await opts.client.messages.create({
+              model: opts.model,
+              system: opts.system,
+              messages,
+              tools: TOOLS,
+              max_tokens: maxTokens,
+              stream: true
+            })
+
+            // Manually accumulate the streamed response
+            const contentBlocks: Array<Record<string, unknown>> = []
+            let stopReason: string | null = null
+            let usage: Record<string, unknown> = {}
+            let messageId = ''
+            let messageModel = opts.model
+            let messageRole: 'assistant' = 'assistant'
+
+            for await (const event of stream) {
+              switch (event.type) {
+                case 'message_start':
+                  messageId = event.message.id
+                  messageModel = event.message.model
+                  messageRole = event.message.role
+                  usage = event.message.usage as Record<string, unknown>
+                  break
+                case 'content_block_start':
+                  if (event.content_block.type === 'text') {
+                    contentBlocks[event.index] = { type: 'text', text: '' }
+                  } else if (event.content_block.type === 'tool_use') {
+                    contentBlocks[event.index] = {
+                      type: 'tool_use',
+                      id: event.content_block.id,
+                      name: event.content_block.name,
+                      input: {}
+                    }
+                  } else {
+                    contentBlocks[event.index] = { ...event.content_block }
+                  }
+                  break
+                case 'content_block_delta':
+                  if (event.delta.type === 'text_delta') {
+                    const block = contentBlocks[event.index]
+                    if (block && block.type === 'text') {
+                      block.text = (block.text as string) + event.delta.text
+                      opts.onStreamDelta?.(streamMsgId, event.delta.text)
+                    }
+                  } else if (event.delta.type === 'input_json_delta') {
+                    const block = contentBlocks[event.index]
+                    if (block && block.type === 'tool_use') {
+                      // Accumulate JSON string, parse at end
+                      block._inputJson = ((block._inputJson as string) || '') + event.delta.partial_json
+                    }
+                  }
+                  break
+                case 'content_block_stop':
+                  // Parse accumulated JSON for tool_use blocks
+                  {
+                    const block = contentBlocks[event.index]
+                    if (block?.type === 'tool_use' && block._inputJson) {
+                      try {
+                        block.input = JSON.parse(block._inputJson as string)
+                      } catch {
+                        block.input = {}
+                      }
+                      delete block._inputJson
+                    }
+                  }
+                  break
+                case 'message_delta':
+                  stopReason = event.delta.stop_reason
+                  if (event.usage) {
+                    usage = { ...usage, ...event.usage }
+                  }
+                  break
+              }
+            }
+
+            opts.onStreamEnd?.(streamMsgId)
+
+            // Build the final Message object
+            response = {
+              id: messageId,
+              type: 'message',
+              role: messageRole,
+              model: messageModel,
+              content: contentBlocks as unknown as Anthropic.Messages.ContentBlock[],
+              stop_reason: stopReason as Anthropic.Messages.StopReason,
+              stop_sequence: null,
+              usage: usage as Anthropic.Messages.Usage
+            }
+            break // stream succeeded
+          } catch (streamError) {
+            opts.onStreamEnd?.(streamMsgId)
+            if (streamRetry < MAX_STREAM_RETRIES && this.isRetryableNetworkError(streamError)) {
+              streamRetry++
+              const delay = 1000 * Math.pow(2, streamRetry - 1) // 1s, 2s, 4s
+              console.warn(
+                `[agentLoop] Stream network error (retry ${streamRetry}/${MAX_STREAM_RETRIES} in ${delay}ms): ${(streamError as Error).message}`
+              )
+              await new Promise((resolve) => setTimeout(resolve, delay))
+              continue
+            }
+            console.error('[agentLoop] Stream error:', streamError)
+            throw streamError
+          }
+        }
+      } else {
+        // Non-streaming mode
+        response = await opts.client.messages.create({
+          model: opts.model,
+          system: opts.system,
+          messages,
+          tools: TOOLS,
+          max_tokens: maxTokens
+        })
+      }
+
+      // Guard against empty or malformed response content
+      if (!response.content || !Array.isArray(response.content)) {
+        console.warn(`[agentLoop] step=${step + 1} empty or invalid response content, stopping`)
+        return messages
+      }
+      // Filter out undefined entries (can happen with sparse arrays from streaming)
+      response.content = response.content.filter((b) => b != null) as typeof response.content
 
       console.log(
         `[agentLoop] step=${step + 1} stop_reason=${response.stop_reason} content_blocks=${response.content.length}`
@@ -691,6 +820,23 @@ ${skillsContext}`,
     return text.length > limit ? text.slice(0, limit) : text
   }
 
+  private isRetryableNetworkError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false
+    const msg = err.message.toLowerCase()
+    const cause = (err as NodeJS.ErrnoException).cause
+    const causeCode =
+      cause && typeof cause === 'object' && 'code' in cause ? (cause as { code: string }).code : ''
+    return (
+      msg === 'terminated' ||
+      causeCode === 'UND_ERR_SOCKET' ||
+      msg.includes('socket') ||
+      msg.includes('econnreset') ||
+      msg.includes('econnrefused') ||
+      msg.includes('etimedout') ||
+      msg.includes('network')
+    )
+  }
+
   /**
    * Validate message sequence for Anthropic API compatibility
    * Ensures messages alternate between user and assistant, and tool calls are properly paired
@@ -698,34 +844,47 @@ ${skillsContext}`,
   private validateMessageSequence(messages: MessageParam[]): void {
     if (messages.length === 0) return
 
-    // First message must be user
+    // First message must be user — prepend an empty user message if not
     if (messages[0].role !== 'user') {
-      console.warn('[agentLoop] First message is not user, this may cause issues')
+      console.warn('[agentLoop] First message is not user, prepending empty user message')
+      messages.unshift({ role: 'user', content: '...' })
     }
 
-    // Check for alternating roles and proper tool call pairing
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i]
+    // Merge consecutive same-role messages to satisfy alternating requirement
+    let i = 1
+    while (i < messages.length) {
+      if (messages[i].role === messages[i - 1].role) {
+        console.warn(
+          `[agentLoop] Message ${i}: Merging consecutive ${messages[i].role} messages`
+        )
+        const prev = messages[i - 1]
+        const curr = messages[i]
 
-      // Check role alternation
-      if (i > 0) {
-        const prevMsg = messages[i - 1]
-        if (msg.role === prevMsg.role) {
-          console.warn(
-            `[agentLoop] Message ${i}: Same role as previous (${msg.role}), this may cause API errors`
-          )
-        }
+        // Merge content: convert both to arrays and concatenate
+        const prevContent = Array.isArray(prev.content)
+          ? prev.content
+          : [{ type: 'text' as const, text: String(prev.content) }]
+        const currContent = Array.isArray(curr.content)
+          ? curr.content
+          : [{ type: 'text' as const, text: String(curr.content) }]
+
+        prev.content = [...prevContent, ...currContent] as MessageParam['content']
+        messages.splice(i, 1)
+      } else {
+        i++
       }
+    }
 
-      // Check tool_use/tool_result pairing
+    // Check tool_use/tool_result pairing
+    for (let j = 0; j < messages.length; j++) {
+      const msg = messages[j]
       if (msg.role === 'assistant' && Array.isArray(msg.content)) {
         const hasToolUse = msg.content.some((block: any) => block.type === 'tool_use')
         if (hasToolUse) {
-          // Next message must be user with tool_result
-          const nextMsg = messages[i + 1]
+          const nextMsg = messages[j + 1]
           if (!nextMsg || nextMsg.role !== 'user') {
             console.error(
-              `[agentLoop] Message ${i}: Assistant has tool_use but next message is not user`
+              `[agentLoop] Message ${j}: Assistant has tool_use but next message is not user`
             )
             throw new Error('Invalid message sequence: tool_use must be followed by user message with tool_result')
           }
@@ -733,7 +892,7 @@ ${skillsContext}`,
             const hasToolResult = nextMsg.content.some((block: any) => block.type === 'tool_result')
             if (!hasToolResult) {
               console.error(
-                `[agentLoop] Message ${i + 1}: User message after tool_use does not contain tool_result`
+                `[agentLoop] Message ${j + 1}: User message after tool_use does not contain tool_result`
               )
               throw new Error('Invalid message sequence: user message after tool_use must contain tool_result')
             }

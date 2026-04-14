@@ -28,7 +28,22 @@ export interface AgentToolResultUpdate {
   toolUseId?: string
 }
 
-export type AgentUpdate = AgentToolUseUpdate | AgentToolResultUpdate
+export interface AgentStreamDeltaUpdate {
+  type: 'stream_delta'
+  messageId: string
+  delta: string
+}
+
+export interface AgentStreamEndUpdate {
+  type: 'stream_end'
+  messageId: string
+}
+
+export type AgentUpdate =
+  | AgentToolUseUpdate
+  | AgentToolResultUpdate
+  | AgentStreamDeltaUpdate
+  | AgentStreamEndUpdate
 
 export type SkillSource = 'workspace' | 'home' | 'builtin'
 

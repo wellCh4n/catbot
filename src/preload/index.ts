@@ -29,8 +29,8 @@ const api = {
     ipcRenderer.invoke('install-skill-zip', zipPath, force),
   selectSkillZip: () => ipcRenderer.invoke('select-skill-zip'),
   deleteSkill: (name: string) => ipcRenderer.invoke('delete-skill', name),
-  agentLoop: (message: ChatMessage, sessionId?: string) =>
-    ipcRenderer.invoke('agent-loop', { message, sessionId }),
+  agentLoop: (message: ChatMessage, sessionId?: string, modelName?: string) =>
+    ipcRenderer.invoke('agent-loop', { message, sessionId, modelName }),
   readSession: (sessionId?: string) => ipcRenderer.invoke('read-session', sessionId),
   clearSession: (sessionId?: string) => ipcRenderer.invoke('clear-session', sessionId),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('delete-session', sessionId),

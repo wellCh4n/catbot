@@ -6,8 +6,14 @@ import { WORKSPACE_PATH } from '../configs'
 export interface ModelSettings {
   provider: string
   apiKey: string
-  modelName: string
+  modelName?: string // deprecated: model is now selected in chat UI
   baseUrl: string
+  stream?: boolean
+}
+
+export interface MemorySettings {
+  enabled: boolean
+  extractionEnabled: boolean
 }
 
 export interface SystemSettings {
@@ -41,15 +47,20 @@ export interface ChannelConfig {
 
 export interface AppConfig {
   model: ModelSettings
+  memory?: MemorySettings
   system: SystemSettings
   channel: ChannelConfig
+}
+
+const DEFAULT_MEMORY: MemorySettings = {
+  enabled: true,
+  extractionEnabled: true
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   model: {
     provider: 'openai',
     apiKey: '',
-    modelName: 'gpt-4o',
     baseUrl: 'https://api.openai.com/v1'
   },
   system: {
@@ -97,7 +108,11 @@ export class SettingsManager {
     try {
       const content = await readFile(this.configPath, 'utf-8')
       const parsed = JSON.parse(content)
-      return { ...DEFAULT_CONFIG, ...parsed }
+      return {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        memory: { ...DEFAULT_MEMORY, ...(parsed.memory ?? {}) }
+      }
     } catch (error: unknown) {
       const code =
         typeof error === 'object' && error !== null && 'code' in error

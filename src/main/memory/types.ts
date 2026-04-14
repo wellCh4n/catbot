@@ -1,119 +1,23 @@
 /**
- * Memory Search Types
- * Based on OpenClaw's memory search architecture
+ * Memory Module — Public Types
+ * Re-exports from the new architecture plus the simplified config interface.
  */
 
-export type EmbeddingProvider = 'openai' | 'local' | 'gemini' | 'voyage' | 'mistral' | 'ollama' | 'auto'
+export * from './memory-types'
+export type { MemoryChunk, VectorStoreOptions, MemorySource } from './legacy-types'
 
-export type MemorySource = 'memory' | 'sessions'
-
-export interface MemorySearchConfig {
+/** Simplified memory configuration. */
+export interface MemoryConfig {
+  /** Whether the memory system is enabled (default: true) */
   enabled: boolean
-  sources: MemorySource[]
-  extraPaths: string[]
-  provider: EmbeddingProvider
-  remote?: {
-    baseUrl?: string
-    apiKey?: string
-    headers?: Record<string, string>
-  }
-  fallback: EmbeddingProvider | 'none'
-  model: string
-  local?: {
-    modelPath?: string
-    modelCacheDir?: string
-  }
-  store: {
-    driver: 'sqlite'
-    path: string
-    vector: {
-      enabled: boolean
-      extensionPath?: string
-    }
-  }
-  chunking: {
-    tokens: number
-    overlap: number
-  }
-  sync: {
-    onSessionStart: boolean
-    onSearch: boolean
-    watch: boolean
-    watchDebounceMs: number
-    intervalMinutes: number
-    sessions: {
-      deltaBytes: number
-      deltaMessages: number
-    }
-  }
-  query: {
-    maxResults: number
-    minScore: number
-    hybrid: {
-      enabled: boolean
-      vectorWeight: number
-      textWeight: number
-      candidateMultiplier: number
-      mmr: {
-        enabled: boolean
-        lambda: number
-      }
-      temporalDecay: {
-        enabled: boolean
-        halfLifeDays: number
-      }
-    }
-  }
-  cache: {
-    enabled: boolean
-    maxEntries?: number
-  }
+  /** Enable background memory extraction after each response (default: true) */
+  extractionEnabled: boolean
+  /** Model used for relevance ranking and extraction (default: claude-haiku-4-5-20251001) */
+  rankingModel: string
 }
 
-export interface MemoryChunk {
-  id: string
-  content: string
-  embedding?: number[]
-  metadata: {
-    source: string
-    sourceType: MemorySource
-    timestamp: number
-    sessionId?: string
-    messageId?: string
-    [key: string]: unknown
-  }
-}
-
-export interface MemorySearchResult {
-  chunk: MemoryChunk
-  score: number
-  relevance?: number
-}
-
-export interface EmbeddingRequest {
-  texts: string[]
-  model?: string
-}
-
-export interface EmbeddingResponse {
-  embeddings: number[][]
-  model: string
-  usage?: {
-    promptTokens: number
-    totalTokens: number
-  }
-}
-
-export interface VectorStoreOptions {
-  path: string
-  vectorEnabled: boolean
-  extensionPath?: string
-}
-
-export interface MemorySearchOptions {
-  query: string
-  maxResults?: number
-  minScore?: number
-  sources?: MemorySource[]
-  sessionId?: string
+export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+  enabled: true,
+  extractionEnabled: true,
+  rankingModel: 'claude-haiku-4-5-20251001'
 }
